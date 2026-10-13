@@ -15,8 +15,26 @@ class VerificationError(Exception):
     pass
 
 
+# Windows-д LibreOffice/poppler суулгагч PATH-д нэмдэггүй тул стандарт байршлыг мөн хайна
+_WIN_SOFFICE = [Path(os.environ.get(v, "")) / "LibreOffice" / "program" / "soffice.exe"
+                for v in ("ProgramFiles", "ProgramFiles(x86)") if os.environ.get(v)]
+
+
 def soffice_bin() -> str | None:
-    return shutil.which("soffice") or shutil.which("libreoffice")
+    found = shutil.which("soffice") or shutil.which("libreoffice")
+    if found:
+        return found
+    return next((str(p) for p in _WIN_SOFFICE if p.is_file()), None)
+
+
+def pdftotext_bin() -> str | None:
+    found = shutil.which("pdftotext")
+    if found or os.name != "nt":
+        return found
+    # winget (oschwartz10612.Poppler) нь WinGet/Packages/oschwartz10612.Poppler_*/poppler-*/Library/bin-д задална
+    pkgs = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages"
+    hits = sorted(pkgs.glob("oschwartz10612.Poppler_*/poppler-*/Library/bin/pdftotext.exe")) if pkgs.is_dir() else []
+    return str(hits[-1]) if hits else None
 
 
 def _run_soffice(args: list[str], timeout: int = 180) -> None:
@@ -26,7 +44,7 @@ def _run_soffice(args: list[str], timeout: int = 180) -> None:
     profile = tempfile.mkdtemp(prefix="lo_profile_")
     try:
         env = dict(os.environ, HOME=os.environ.get("HOME", profile))
-        subprocess.run([exe, "--headless", "--norestore", f"-env:UserInstallation=file://{profile}", *args],
+        subprocess.run([exe, "--headless", "--norestore", f"-env:UserInstallation={Path(profile).as_uri()}", *args],
                        check=True, capture_output=True, timeout=timeout, env=env)
     finally:
         shutil.rmtree(profile, ignore_errors=True)
@@ -91,9 +109,10 @@ def docx_text(docx: Path) -> str:
         pdf = outdir / "in.pdf"
         if not pdf.exists():
             raise VerificationError("docx → PDF хөрвүүлэлт амжилтгүй")
-        if shutil.which("pdftotext"):
+        pdftotext = pdftotext_bin()
+        if pdftotext:
             txt = outdir / "in.txt"
-            subprocess.run(["pdftotext", "-layout", str(pdf), str(txt)], check=True, timeout=60)
+            subprocess.run([pdftotext, "-layout", str(pdf), str(txt)], check=True, timeout=60)
             return txt.read_text(encoding="utf-8", errors="replace")
         from pypdf import PdfReader  # fallback
         return "\n".join(p.extract_text() or "" for p in PdfReader(str(pdf)).pages)

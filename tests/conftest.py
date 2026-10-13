@@ -1,4 +1,3 @@
-import shutil
 import sys
 from pathlib import Path
 
@@ -10,7 +9,9 @@ sys.path.insert(0, str(ROOT))
 from app import models as M  # noqa: E402
 from app.models import Finding, ItemResult, MenuItem, RunData, TimelineEvent  # noqa: E402
 
-HAS_SOFFICE = bool(shutil.which("soffice") or shutil.which("libreoffice"))
+from app.report.verify import soffice_bin  # noqa: E402
+
+HAS_SOFFICE = bool(soffice_bin())
 needs_soffice = pytest.mark.skipif(not HAS_SOFFICE, reason="LibreOffice суугаагүй")
 
 
