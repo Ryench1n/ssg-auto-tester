@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Run-ын үр дүн (тайлан, screenshot, лог, runs.db) — repo-д орохгүй
+runs/
+
+# scripts/make_report_template.py-оор үүсгэгддэг
+templates/report_tpl.docx
+
+# Локал Claude Code тохиргоо
+.claude/settings.local.json

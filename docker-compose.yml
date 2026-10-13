@@ -1,0 +1,13 @@
+# ⚠ Гар нэвтрэлт (headed хөтөч) контейнерт ажиллахгүй — дэлгэц байхгүй. Docker-ийг зөвхөн түүх/тайлан
+#   харахад ашиглана; тест ажиллуулахдаа локал `python -m app` хэрэглэнэ (README → Docker).
+services:
+  smoke-tester:
+    build: .
+    image: ssg-smoke-tester:latest
+    ports:
+      - "127.0.0.1:8000:8000"     # зөвхөн локал машинаас хандана
+    volumes:
+      - ./runs:/app/runs           # тайлан, screenshot, лог
+      - ./config:/app/config       # сайтын YAML тохиргоо
+    shm_size: "1gb"                # Chromium-д хангалттай shared memory
+    restart: unless-stopped

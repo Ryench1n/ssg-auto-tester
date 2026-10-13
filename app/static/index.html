@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSG Auto Tester</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2">
+<style>
+  :root { --bg:#f4f6fa; --card:#fff; --ink:#1a202c; --muted:#64748b; --line:#e2e8f0; --brand:#1f4e8c;
+          --pass:#1a7f4b; --fail:#c0392b; --block:#c77700; --crit:#b91c1c; --major:#b7791f; --minor:#2f855a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 "Segoe UI", Arial, sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:var(--brand); color:#fff; padding:14px 24px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:18px; margin:0; letter-spacing:.3px; }
+  header span { opacity:.8; font-size:12px; }
+  nav { margin-left:auto; display:flex; gap:6px; }
+  nav button { background:transparent; border:1px solid rgba(255,255,255,.4); color:#fff; padding:6px 12px; border-radius:6px; cursor:pointer; }
+  nav button.on { background:#fff; color:var(--brand); }
+  main { max-width:1180px; margin:20px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-bottom:16px; }
+  .card h2 { font-size:15px; margin:0 0 12px; color:var(--brand); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  input[type=text], input[type=password], input[type=url], input[type=number], select {
+    width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+  .warn { color:var(--block); font-size:12px; margin-top:4px; }
+  details { margin-top:12px; } summary { cursor:pointer; color:var(--brand); }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .btn { background:var(--brand); color:#fff; border:0; padding:10px 18px; border-radius:7px; font-weight:600; cursor:pointer; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .btn.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+  .btn.danger { background:var(--fail); }
+  .btn.big { padding:14px 22px; font-size:15px; }
+  .mods { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:6px; margin:10px 0; }
+  .mods label { display:flex; gap:8px; align-items:center; color:var(--ink); font-size:13px; border:1px solid var(--line); border-radius:6px; padding:6px 8px; margin:0; }
+  .bar { height:12px; background:#e5eaf2; border-radius:6px; overflow:hidden; }
+  .bar > div { height:100%; background:var(--brand); width:0; transition:width .3s; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin:12px 0; }
+  .kpi { border:1px solid var(--line); border-radius:8px; padding:10px; text-align:center; }
+  .kpi b { display:block; font-size:22px; } .kpi small { color:var(--muted); }
+  .pass { color:var(--pass); } .fail { color:var(--fail); } .blocked { color:var(--block); }
+  .log { background:#0f172a; color:#cbd5e1; font:12px/1.5 Consolas, monospace; padding:10px; border-radius:8px; height:220px; overflow:auto; white-space:pre-wrap; }
+  .log .warn { color:#fbbf24; font-size:12px; margin:0; } .log .error { color:#f87171; }
+  .banner { padding:18px; border-radius:10px; font-size:22px; font-weight:700; color:#fff; text-align:center; }
+  .banner.go { background:var(--pass); } .banner.nogo { background:var(--fail); }
+  .banner.incomplete { background:var(--muted); }
+  .banner small { display:block; font-size:13px; font-weight:400; margin-top:6px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:#f1f5f9; font-weight:600; position:sticky; top:0; }
+  .tbl { max-height:460px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  .sev { font-weight:600; white-space:nowrap; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; color:#fff; }
+  .pill.Pass { background:var(--pass); } .pill.Fail { background:var(--fail); } .pill.Blocked { background:var(--block); } .pill.Pending { background:#94a3b8; }
+  .hidden { display:none !important; }
+  .muted { color:var(--muted); }
+  .links a { margin-right:14px; font-size:13px; }
+  img.shot { max-width:260px; border:1px solid var(--line); border-radius:6px; cursor:zoom-in; }
+  pre.stack { white-space:pre-wrap; font-size:11px; background:#f8fafc; padding:6px; border-radius:6px; margin:4px 0 0; }
+  /* Тестийн урсгал (pipeline) */
+  .steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; margin-top:6px; }
+  .step { border:1px solid var(--line); border-radius:9px; padding:12px; position:relative; background:#fbfcfe; }
+  .step.on { border-color:var(--brand); background:#f0f5fc; }
+  .step .n { position:absolute; top:10px; right:12px; color:var(--muted); font-size:12px; }
+  .step label.head { display:flex; gap:8px; align-items:center; font-size:14px; color:var(--ink); font-weight:600; margin:0 0 4px; }
+  .step .desc { font-size:12px; color:var(--muted); }
+  .flows { margin-top:8px; display:flex; flex-direction:column; gap:6px; }
+  .flows label { display:flex; gap:8px; align-items:flex-start; color:var(--ink); font-size:13px; border:1px solid var(--line); border-radius:6px; padding:6px 8px; margin:0; background:#fff; }
+  .flows label.off { opacity:.6; }
+  .flows small { display:block; color:var(--muted); }
+  .mutwarn { margin-top:10px; padding:10px 12px; border-radius:8px; background:#fff7e6; border:1px solid #f5c26b; color:#8a5300; font-size:13px; }
+  .loginbox { padding:16px 18px; border-radius:10px; margin-bottom:12px; background:#fff7e6; border:2px solid #f5a623; color:#7a4b00; }
+  .loginbox.drop { background:#fdecea; border-color:var(--fail); color:#8b1d13; }
+  .loginbox b { font-size:17px; display:block; } .loginbox .cd { font-size:22px; font-weight:700; float:right; }
+  .pipe { list-style:none; margin:0 0 12px; padding:0; border:1px solid var(--line); border-radius:8px; }
+  .pipe > li { padding:8px 12px; border-bottom:1px solid var(--line); }
+  .pipe > li:last-child { border-bottom:0; }
+  .pipe .row1 { display:flex; gap:10px; align-items:center; }
+  .pipe .msg { color:var(--muted); font-size:12px; margin-left:auto; text-align:right; }
+  .pipe ol { margin:6px 0 0 18px; padding:0; font-size:12px; }
+  .pipe ol li { padding:2px 0; }
+  .pill.running { background:var(--brand); } .pill.pending { background:#94a3b8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SSG Auto Tester</h1><span>Smart Software Group · тест орчны автомат тест (нэвтрэх → smoke → форм шалгалт → CRUD → бичсэн урсгал)</span>
+  <nav><button id="navRun" class="on">Шинэ тест</button><button id="navHist">Түүх</button></nav>
+</header>
+<main>
+<section id="pageRun">
+  <!-- 1. Эхлүүлэх -->
+  <div class="card" id="cardStart">
+    <h2>1. Тест эхлүүлэх</h2>
+    <div class="grid">
+      <div style="grid-column:1/-1"><label>Тест орчны URL *</label>
+        <input type="url" id="url" placeholder="https://testaccounting.smartapp.mn/">
+        <div class="warn" id="urlWarn"></div></div>
+      <div style="grid-column:1/-1" class="flows">
+        <label><input type="checkbox" id="useCdp">
+          <span><b>🌐 Өөрийн Chrome-оор нэвтрэх</b> <span class="muted">(Cloudflare / captcha-тай сайт)</span>
+          <small>Captcha нь автомат хөтчийг хүлээж авдаггүй. «Chrome нээх» → нээгдсэн Chrome дээр captcha-г давж
+            <b>өөрөө нэвтэрнэ</b> → тестээ эхлүүлнэ. Хэрэгсэл тэр Chrome-д холбогдож шинэ таб дээр ажиллана.</small>
+          <span class="row" style="margin-top:6px"><button type="button" class="btn ghost" id="btnChrome">🌐 Chrome нээх</button>
+            <span class="muted" id="chromeMsg"></span></span></span></label>
+      </div>
+      <div><label>Төслийн нэр (хоосон бол URL-аас)</label><input type="text" id="project" placeholder="Accounting"></div>
+      <div><label>Тестлэх хувилбар *</label><input type="text" id="version" placeholder="v26.2.10">
+        <div class="muted" style="font-size:11px">Файлын нэр, баримтын хувилбарт орно</div></div>
+      <div><label>Тест гүйцэтгэгч *</label><input type="text" id="tester" placeholder="Э.Ренчин">
+        <div class="muted" style="font-size:11px">Гүйцэтгэсэн хүн / QA Tester / Бэлтгэсэн / Тайлан бэлтгэсэн</div></div>
+      <div><label>QA Lead нэр</label><input type="text" id="qa_lead" placeholder="Б.Ганбат">
+        <div class="muted" style="font-size:11px">Зөвхөн «QA Lead» ба «QA баг»-т орно</div></div>
+    </div>
+
+    <h2 style="margin-top:16px">Тестийн урсгал</h2>
+    <div class="muted" style="font-size:12px">Сонгосон алхмууд нэг хөтөч, нэг session-д дараалан ажиллаж, нэг тайлан гарна.</div>
+    <div class="steps">
+      <div class="step on"><span class="n">1</span>
+        <label class="head"><input type="checkbox" checked disabled> 🔑 Нэвтрэх (гараар)</label>
+        <div class="desc">Хөтөч нээгдэж <code>/auth/login</code> руу очно — та өөрөө нэвтэрнэ. Нууц үг энэ системд хэзээ ч орохгүй. Үргэлж асаалттай.</div>
+      </div>
+      <div class="step on" id="cardSmoke"><span class="n">2</span>
+        <label class="head"><input type="checkbox" id="stSmoke" checked> 🔍 Smoke (READ-ONLY)</label>
+        <div class="desc">Бүх модуль/цэсийг нээж хааж алдаа илрүүлнэ. Өгөгдөл өөрчлөхгүй.</div>
+      </div>
+      <div class="step" id="cardForm"><span class="n">3</span>
+        <label class="head"><input type="checkbox" id="stForm"> 🧾 Форм шалгалт (READ-ONLY)</label>
+        <div class="desc">Smoke-ийн дараа олдсон Нэмэх/Засах товчтой цэсүүдээс сонгоод, цэс бүрт: Шинэ формыг нээж, доторх lookup ("...") бүрийг
+          ачаалж, эхний бичлэгийг засварын горимд нээгээд <b>хадгалалгүй</b> хаана. «Invalid column name …» мэт алдааг
+          өгөгдөл үүсгэлгүй олно. Smoke шаардлагатай.</div>
+      </div>
+      <div class="step" id="cardAuto"><span class="n">4</span>
+        <label class="head"><input type="checkbox" id="stAuto"> 🤖 Автомат CRUD</label>
+        <div class="desc">YAML бичихгүйгээр: цэсний формыг илрүүлж run_tag-тай тестийн бичлэг бүртгэж → хайж → засаж → устгана.
+          Зөвхөн Нэмэх + Устгах товчтой цэсүүд.</div>
+        <div class="flows hidden" id="autoOpts">
+          <label><input type="radio" name="autoSrc" id="autoAfter" value="after" checked>
+            <span><b>Smoke-ийн дараа сонгох</b><small>Smoke цэс бүрийн товчийг бүртгэж, CRUD боломжтой цэсүүдийг жагсаана</small></span></label>
+          <label><input type="radio" name="autoSrc" id="autoCat" value="catalog">
+            <span><b>Өмнөх smoke-ийн бүртгэлээс одоо сонгох</b><small id="catInfo">—</small></span></label>
+          <div class="flows hidden" id="menuCat"></div>
+        </div>
+      </div>
+      <div class="step" id="cardRec"><span class="n">5</span>
+        <label class="head">🎥 Бичсэн урсгалууд</label>
+        <div class="desc">«Урсгал бичих»-ээр бичиж хадгалсан урсгалуудыг дахин тоглуулна (өгөгдөл өөрчилнө, run_tag-тай).</div>
+        <div class="flows" id="recFlows"><small class="muted">URL оруулна уу</small></div>
+      </div>
+    </div>
+    <div class="mutwarn hidden" id="mutWarn">⚠ Өгөгдөл өөрчилнө — зөвхөн тест орчинд, run_tag-тай. Бүртгэсэн бичлэг бүр run_tag агуулж, урсгалын төгсгөлд цэвэрлэгдэнэ.</div>
+
+    <details><summary>Нарийвчилсан тохиргоо (smoke)</summary>
+      <div class="grid" style="margin-top:10px">
+        <div><label>Цэс дарсны дараах хүлээлт (мс)</label><input type="number" id="wait_ms" value="3000" min="500" step="500"></div>
+        <div><label><input type="checkbox" id="check_risky" checked> Эрсдэлтэй цэсийг шалгах (хамгийн сүүлд)</label></div>
+        <div><label><input type="checkbox" id="confirm" checked> Fail цэсийг дахин баталгаажуулах</label></div>
+        <div><label><input type="checkbox" id="select_modules" checked> Discovery-ийн дараа модуль сонгох</label></div>
+      </div>
+    </details>
+    <div class="row" style="margin-top:14px"><button class="btn big" id="btnStart">Сонгосон 2 алхмыг эхлүүлэх</button>
+      <span class="muted" id="startMsg"></span></div>
+  </div>
+
+  <!-- 1b. Урсгал бичих -->
+  <div class="card" id="cardRecord">
+    <h2>🎥 Урсгал бичих (record → replay)</h2>
+    <div class="muted" style="font-size:12px">Хөтөч нээгдэж та нэвтэрсний дараа урсгалаа (ж: баримт бүртгэх → батлах → устгах)
+      <b>гараар</b> хийнэ — хэрэгсэл таны цэс, товч, талбар, lookup сонголтыг бүртгэнэ. Таны бичсэн текст утгууд
+      <code>{run_tag} …</code> болж дахин тоглуулах бүрт шинэ, давтагдашгүй тестийн өгөгдөл болно. Нууц үг бүртгэгдэхгүй.</div>
+    <div class="row" style="margin-top:10px">
+      <input type="text" id="recName" placeholder="Урсгалын нэр (ж: Ажилтан бүртгэх)" style="max-width:360px">
+      <button class="btn" id="btnRecStart">● Бичиж эхлэх</button>
+      <span class="muted" id="recMsg"></span></div>
+  </div>
+
+  <!-- 1c. Бичиж байх үеийн явц / үр дүн -->
+  <div class="card hidden" id="cardRecLive">
+    <h2>🎥 <span id="recTitle">Бичиж байна…</span></h2>
+    <div class="muted" id="recHint">Нээгдсэн хөтөч дээр урсгалаа хийнэ үү. Дуусмагц «⏹ Дуусгах» дарна.</div>
+    <ol id="recEvents" style="max-height:260px;overflow:auto;font-size:13px"></ol>
+    <div class="row"><button class="btn danger" id="btnRecStop">⏹ Дуусгах</button></div>
+    <div class="hidden" id="recResult">
+      <div class="mutwarn hidden" id="recWarn"></div>
+      <label style="margin-top:10px">YAML (хадгалахаас өмнө засаж болно)</label>
+      <textarea id="recYaml" spellcheck="false" style="width:100%;height:320px;font:12px Consolas,monospace;border:1px solid var(--line);border-radius:6px;padding:8px"></textarea>
+      <div class="row" style="margin-top:8px"><button class="btn" id="btnRecSave">💾 Хадгалах</button>
+        <button class="btn ghost" id="btnRecDiscard">Хаях</button><span class="muted" id="recSaveMsg"></span></div>
+    </div>
+  </div>
+
+  <!-- 2. Discovery -->
+  <div class="card hidden" id="cardDisc">
+    <h2>2. Илэрсэн модулиуд</h2>
+    <div class="muted" id="discInfo"></div>
+    <div class="row" style="margin-top:8px"><label style="margin:0"><input type="checkbox" id="allMods" checked> Бүгдийг шалгах</label></div>
+    <div class="mods" id="mods"></div>
+    <button class="btn" id="btnSelect">Сонгосноор үргэлжлүүлэх</button>
+  </div>
+
+  <!-- 2a. Форм шалгалтын цэс сонголт (smoke-ийн дараа) -->
+  <div class="card hidden" id="cardFormSel">
+    <h2>🧾 Форм шалгалт хийх цэсүүдийг сонгоно уу</h2>
+    <div class="muted">READ-ONLY — сонгосон цэс бүрийн Шинэ ба засварын формыг нээж, lookup-уудыг ачаалаад хадгалалгүй хаана.
+      Сонгохгүй удвал бүх цэсийг шалгана.</div>
+    <div class="row" style="margin-top:8px"><label style="margin:0"><input type="checkbox" id="allForm" checked> Бүгдийг сонгох</label>
+      <span class="muted" id="formSelInfo"></span></div>
+    <div class="row hidden" id="formNaRow" style="margin-top:6px">
+      <button class="btn ghost" id="btnFormNa">Зөвхөн өмнөх run-д өгөгдөлгүй (N/A) байсан цэсүүд</button>
+      <span class="muted" id="formNaInfo"></span></div>
+    <div id="formMenus"></div>
+    <div class="row"><button class="btn" id="btnFormGo">Сонгосноор форм шалгалт эхлүүлэх</button>
+      <button class="btn ghost" id="btnFormSkip">Алгасах</button></div>
+  </div>
+
+  <!-- 2b. Автомат CRUD-ийн цэс сонголт (smoke-ийн дараа) -->
+  <div class="card hidden" id="cardCrudSel">
+    <h2>🤖 Автомат CRUD хийх цэсүүдийг сонгоно уу</h2>
+    <div class="mutwarn">⚠ Сонгосон цэс бүрт тестийн бичлэг бүртгэж, засаж, устгана — зөвхөн тест орчинд, run_tag-тай.
+      Юу ч сонгохгүй бол алгасна.</div>
+    <div class="row" style="margin-top:8px"><label style="margin:0"><input type="checkbox" id="allCrud"> Бүгдийг сонгох</label>
+      <span class="muted" id="crudSelInfo"></span></div>
+    <div class="mods" id="crudMenus"></div>
+    <div class="row"><button class="btn" id="btnCrudGo">Сонгосноор автомат CRUD эхлүүлэх</button>
+      <button class="btn ghost" id="btnCrudSkip">Алгасах</button></div>
+  </div>
+
+  <!-- 3. Явц -->
+  <div class="card hidden" id="cardProg">
+    <h2>3. Явц <span class="muted" id="state"></span></h2>
+    <div class="loginbox hidden" id="loginBox"><span class="cd" id="loginCd"></span>
+      <b id="loginTitle">🔑 Нээгдсэн хөтөч дээр нэвтэрнэ үү</b>
+      <span id="loginReason"></span></div>
+    <ul class="pipe" id="pipe"></ul>
+    <div class="muted" style="font-size:12px;margin-bottom:4px" id="progLbl">Smoke-ийн явц:</div>
+    <div class="bar"><div id="bar"></div></div>
+    <div class="row muted" style="margin-top:6px; justify-content:space-between">
+      <span id="progTxt">0/0</span><span id="eta"></span></div>
+    <div style="margin-top:6px">Одоогийн цэс: <b id="current">—</b></div>
+    <div class="kpis">
+      <div class="kpi"><b class="pass" id="cPass">0</b><small>Pass</small></div>
+      <div class="kpi"><b class="fail" id="cFail">0</b><small>Fail</small></div>
+      <div class="kpi"><b class="blocked" id="cBlocked">0</b><small>Blocked</small></div>
+      <div class="kpi"><b id="cLogout">0</b><small>Logout</small></div>
+      <div class="kpi"><b id="cCrash">0</b><small>Runtime уналт</small></div>
+    </div>
+    <div class="muted" style="margin-bottom:6px">Сүүлийн алдаа: <span id="lastErr">—</span></div>
+    <div class="log" id="log"></div>
+    <div class="row" style="margin-top:10px"><button class="btn danger" id="btnStop">Зогсоох</button></div>
+  </div>
+
+  <!-- 4. Үр дүн -->
+  <div class="card hidden" id="cardRes">
+    <h2>4. Үр дүн</h2>
+    <div id="banner" class="banner"></div>
+    <ul class="pipe hidden" id="resPipe" style="margin-top:12px"></ul>
+    <div class="kpis" id="resKpis"></div>
+    <div class="row" style="margin:14px 0">
+      <a class="btn big" id="dlX" href="#">⬇ Test Cases (.xlsx)</a>
+      <a class="btn big" id="dlD" href="#">⬇ Test Report (.docx)</a>
+    </div>
+    <div class="row hidden" id="formDl" style="margin:0 0 14px">
+      <a class="btn ghost" id="dlFX" href="#">🧾 Форм шалгалт — Test Cases (.xlsx)</a>
+      <a class="btn ghost" id="dlFD" href="#">🧾 Форм шалгалт — Test Report (.docx)</a>
+      <span class="muted" id="formInfo"></span>
+    </div>
+    <div class="links"><a id="dlS" href="#">Screenshot-ууд (.zip)</a><a id="dlR" href="#">Raw лог (.json)</a><a id="dlL" href="#">run.log</a>
+      <a id="dlY" href="#" class="hidden">🤖 Автомат CRUD-оос үүсгэсэн flows YAML ноорог</a></div>
+    <div class="warn" id="resWarn"></div>
+    <div class="mutwarn hidden" id="resumeBox"><span id="resumeTxt"></span>
+      <button class="btn" id="btnResume" style="margin-left:10px">▶ Үлдсэн цэсүүдийг үргэлжлүүлэх</button></div>
+    <h2 style="margin-top:18px">Bug-ууд</h2>
+    <div class="tbl"><table><thead><tr><th>Bug ID</th><th>Эрэмбэ</th><th>Тайлбар</th><th>Холбогдох TC</th><th>Засах санал</th><th>Screenshot</th></tr></thead><tbody id="bugRows"></tbody></table></div>
+    <h2 style="margin-top:18px">Test Case-ууд</h2>
+    <div class="row" style="margin-bottom:8px">
+      <select id="fRes" style="width:auto"><option value="">Бүх үр дүн</option><option>Pass</option><option>Fail</option><option>Blocked</option><option>Pending</option></select>
+      <select id="fMod" style="width:auto"><option value="">Бүх модуль</option></select>
+      <input type="text" id="fTxt" placeholder="Хайх…" style="width:220px">
+    </div>
+    <div class="tbl"><table><thead><tr><th>TC ID</th><th>Модуль</th><th>Зорилго</th><th>Эрэмбэ</th><th>Үр дүн</th><th>Bug</th><th>Тайлбар</th></tr></thead><tbody id="tcRows"></tbody></table></div>
+  </div>
+</section>
+
+<section id="pageHist" class="hidden">
+  <div class="card">
+    <h2>Өмнөх run-ууд</h2>
+    <div class="muted">Хоёр run сонгоод харьцуулна (regression: шинэ / засагдсан bug).</div>
+    <div class="tbl" style="margin-top:10px"><table><thead><tr><th></th><th>Огноо</th><th>Төсөл</th><th>URL</th><th>Хувилбар</th><th>Pass Rate</th><th>Шийдвэр</th><th>Статус</th><th>Файл</th><th></th></tr></thead><tbody id="histRows"></tbody></table></div>
+    <button class="btn" id="btnCmp" style="margin-top:10px">Сонгосон 2 run-ыг харьцуулах</button>
+    <div id="cmp" style="margin-top:14px"></div>
+  </div>
+</section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let runId = null, es = null, lastIdx = 0, discovered = [], loginTimer = null;
+const STATES = {starting:'эхэлж байна', login:'нэвтрэлт хүлээж байна',
+  discovery:'цэс илрүүлж байна', awaiting_selection:'модуль сонголт хүлээж байна',
+  running:'цэсүүдийг шалгаж байна', confirming:'давтан баталгаажуулж байна', reporting:'тайлан үүсгэж байна',
+  awaiting_crud_selection:'автомат CRUD хийх цэсийн сонголт хүлээж байна',
+  awaiting_form_selection:'форм шалгалт хийх цэсийн сонголт хүлээж байна',
+  recording:'🎥 бичиж байна — хөтөч дээр урсгалаа хийнэ үү'};
+const STATUS_TXT = {Pending:'хүлээгдэж буй', running:'ажиллаж байна', Pass:'Pass', Fail:'Fail', Blocked:'Blocked'};
+const pill = (st) => `<span class="pill ${st === 'Pending' ? 'pending' : st}">${esc(STATUS_TXT[st] || st)}</span>`;
+
+// ---- Тестийн урсгал: алхам сонголт ----
+function syncSteps() {
+  const auto = $('stAuto').checked;
+  $('cardSmoke').classList.toggle('on', $('stSmoke').checked);
+  $('cardAuto').classList.toggle('on', auto);
+  $('cardForm').classList.toggle('on', $('stForm').checked);
+  $('autoOpts').classList.toggle('hidden', !auto);
+  $('menuCat').classList.toggle('hidden', !(auto && $('autoCat').checked));
+  $('mutWarn').classList.toggle('hidden', !auto);
+  const nRec = document.querySelectorAll('.recchk:checked').length;
+  $('cardRec').classList.toggle('on', nRec > 0);
+  const n = 1 + ($('stSmoke').checked ? 1 : 0) + ($('stForm').checked ? 1 : 0) + (auto ? 1 : 0) + nRec;
+  $('mutWarn').classList.toggle('hidden', !(auto || nRec));
+  $('btnStart').textContent = `Сонгосон ${n} алхмыг эхлүүлэх`;
+}
+// ---- Автомат CRUD: өмнөх smoke-ийн каталог ----
+let MENUS = [];
+async function loadMenus() {
+  const u = $('url').value.trim();
+  if (!u) { MENUS = []; $('catInfo').textContent = 'Эхлээд URL оруулна уу'; $('menuCat').innerHTML = ''; return; }
+  let r = {menus: [], allowed: true, reason: ''};
+  try { const res = await fetch('/api/menus?url=' + encodeURIComponent(u)); if (res.ok) r = await res.json(); } catch (e) {}
+  MENUS = r.menus;
+  const last = MENUS.map(m => m.updated_at).sort().pop();
+  $('catInfo').textContent = !r.allowed ? '⛔ ' + r.reason
+    : MENUS.length ? `${MENUS.length} CRUD боломжтой цэс (сүүлд ${esc((last || '').replace('T', ' '))})`
+    : 'Бүртгэл алга — эхлээд smoke ажиллуулна уу';
+  $('autoCat').disabled = !MENUS.length || !r.allowed;
+  $('autoAfter').disabled = !r.allowed;
+  if ($('autoCat').disabled && $('autoCat').checked) $('autoAfter').checked = true;
+  $('menuCat').innerHTML = MENUS.map(m => `<label><input type="checkbox" class="menuchk" value="${esc(m.key)}">
+      <span><b>${esc(m.name)}</b> <span class="muted">${esc(m.module)}${m.folder ? ' › ' + esc(m.folder) : ''}</span>
+      <small>${esc(m.buttons.join(' · '))}${m.app_version ? ' — ' + esc(m.app_version) : ''}</small></span></label>`).join('');
+  syncSteps();
+}
+$('stAuto').onchange = () => { if ($('stAuto').checked) loadMenus(); syncSteps(); };
+$('autoAfter').onchange = syncSteps; $('autoCat').onchange = syncSteps;
+$('stSmoke').onchange = syncSteps; $('stForm').onchange = syncSteps;
+
+// ---- Бичсэн урсгалууд (record → replay) ----
+async function loadRecorded() {
+  const u = $('url').value.trim();
+  if (!u) { $('recFlows').innerHTML = '<small class="muted">URL оруулна уу</small>'; return; }
+  let flows = [];
+  try { const r = await fetch('/api/flows?url=' + encodeURIComponent(u)); if (r.ok) flows = (await r.json()).filter(f => f.recorded); } catch (e) {}
+  $('recFlows').innerHTML = flows.length ? flows.map(f => `<label class="${f.allowed ? '' : 'off'}">
+      <input type="checkbox" class="recchk" value="${esc(f.name)}" ${f.allowed ? '' : 'disabled'}>
+      <span><b>${esc(f.name.replace(/^rec: /, ''))}</b> <span class="muted">(${f.code}, ${f.steps} алхам)</span>
+      <small>${esc(f.allowed ? f.description : f.reason)}</small>
+      <a href="#" class="recdel" data-name="${esc(f.name)}" style="font-size:12px">устгах</a></span></label>`).join('')
+    : '<small class="muted">Бичсэн урсгал алга — «🎥 Урсгал бичих»-ээр бичнэ</small>';
+  document.querySelectorAll('.recchk').forEach(c => c.onchange = syncSteps);
+  document.querySelectorAll('.recdel').forEach(a => a.onclick = async (e) => {
+    e.preventDefault();
+    if (!confirm(`«${a.dataset.name}» урсгалыг устгах уу?`)) return;
+    await fetch('/api/recorded?url=' + encodeURIComponent(u) + '&name=' + encodeURIComponent(a.dataset.name), {method: 'DELETE'});
+    loadRecorded();
+  });
+  syncSteps();
+}
+// ---- Өөрийн Chrome (captcha-тай сайт) ----
+async function chromeStatus() {
+  try { const r = await (await fetch('/api/chrome')).json();
+    $('chromeMsg').textContent = r.alive ? `✅ Холбогдох боломжтой (${r.version}) — нээгдсэн Chrome дээр нэвтэрсэн эсэхээ шалгаад тестээ эхлүүлнэ үү`
+      : (r.chrome ? 'Chrome нээгдээгүй байна' : '⚠ Google Chrome суулгаагүй байна');
+    return r.alive; } catch (e) { return false; }
+}
+$('btnChrome').onclick = async () => {
+  const u = $('url').value.trim();
+  if (!u) { $('chromeMsg').textContent = 'Эхлээд URL оруулна уу'; return; }
+  $('chromeMsg').textContent = 'Chrome нээж байна…';
+  const res = await fetch('/api/chrome/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url: u})});
+  let r = await res.text(); try { r = JSON.parse(r); } catch (e) {}
+  if (!res.ok) { $('chromeMsg').textContent = '❌ ' + (r.detail || r); return; }
+  $('useCdp').checked = true;
+  $('chromeMsg').textContent = '✅ Chrome нээгдлээ — тэнд captcha-г давж нэвтэрсний дараа тестээ эхлүүлнэ үү';
+};
+$('useCdp').onchange = () => { if ($('useCdp').checked) chromeStatus(); };
+// Тест гүйцэтгэгч / QA Lead-ийг дараагийн удаа дахин бичихгүй (хувилбар run бүрт өөр тул санахгүй)
+try { const p = JSON.parse(localStorage.getItem('ssg_people') || '{}');
+      if (p.tester) $('tester').value = p.tester; if (p.qa_lead) $('qa_lead').value = p.qa_lead; } catch (e) {}
+let recUrl = '';
+$('btnRecStart').onclick = async () => {
+  const name = $('recName').value.trim();
+  if (!$('url').value.trim()) { $('recMsg').textContent = 'Дээр тест орчны URL-аа оруулна уу.'; return; }
+  if (!name) { $('recMsg').textContent = 'Урсгалын нэрийг оруулна уу.'; return; }
+  recUrl = $('url').value.trim();
+  $('recEvents').innerHTML = ''; $('recResult').classList.add('hidden'); $('btnRecStop').disabled = false;
+  $('recTitle').textContent = `«${name}» — нэвтрэлт хүлээж байна…`; $('recHint').classList.remove('hidden');
+  $('cardRecLive').classList.remove('hidden');
+  $('recMsg').textContent = '';
+  startRun([{kind: 'record', flow: name}]);
+};
+$('btnRecStop').onclick = async () => {
+  $('btnRecStop').disabled = true;
+  const r = await fetch(`/api/runs/${runId}/record-stop`, {method: 'POST'});
+  if (!r.ok) { $('btnRecStop').disabled = false; alert('Бичлэг явагдаагүй байна (нэвтэрсэн үү?)'); }
+};
+function showRecording(rec) {
+  $('btnRecStop').disabled = true; $('recHint').classList.add('hidden');
+  $('recTitle').textContent = `«${rec.name}» — ${rec.events} үйлдэл → ${rec.steps} алхам`;
+  $('recYaml').value = rec.yaml || '';
+  $('recWarn').classList.toggle('hidden', !(rec.warnings || []).length);
+  $('recWarn').innerHTML = (rec.warnings || []).map(w => '⚠ ' + esc(w)).join('<br>');
+  $('recResult').classList.remove('hidden'); $('recSaveMsg').textContent = '';
+  $('recResult').dataset.name = rec.name;
+  $('cardRecLive').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+$('btnRecSave').onclick = async () => {
+  const res = await fetch('/api/recorded', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: recUrl, name: $('recResult').dataset.name, yaml: $('recYaml').value})});
+  let r = await res.text(); try { r = JSON.parse(r); } catch (e) {}
+  $('recSaveMsg').textContent = res.ok ? `✅ Хадгаллаа: ${r.name} (${r.code}, ${r.steps} алхам) — «Бичсэн урсгалууд»-аас сонгож ажиллуулна`
+                                       : '❌ ' + (r.detail || r);
+  if (res.ok) loadRecorded();
+};
+$('btnRecDiscard').onclick = () => $('cardRecLive').classList.add('hidden');
+
+// ---- Нэвтрэлт хүлээх мэдэгдэл ----
+// Урт run-ы дунд нэвтрэлт хүлээвэл хэрэглэгчийн анхаарлыг татна (таб гарчиг анивчих + мэдэгдэл + дуу)
+let flashTimer = null;
+function alertUser(msg) {
+  clearInterval(flashTimer); const base = 'SSG Auto Tester'; let on = false;
+  flashTimer = setInterval(() => { document.title = (on = !on) ? '🔑 ' + msg : base; }, 900);
+  try { if (window.Notification) { if (Notification.permission === 'granted') new Notification(msg);
+        else if (Notification.permission !== 'denied') Notification.requestPermission(); } } catch (e) {}
+  try { const a = new AudioContext(), o = a.createOscillator(); o.connect(a.destination); o.frequency.value = 880;
+        o.start(); o.stop(a.currentTime + 0.4); } catch (e) {}
+}
+function stopAlert() { clearInterval(flashTimer); document.title = 'SSG Auto Tester'; }
+function showLogin(ev) {
+  alertUser(/session/i.test(ev.reason || '') ? 'Session тасарлаа — дахин нэвтэрнэ үү' : 'Нэвтэрнэ үү');
+  const drop = /session/i.test(ev.reason || '');
+  $('loginBox').classList.remove('hidden'); $('loginBox').classList.toggle('drop', drop);
+  $('loginTitle').textContent = drop ? '⚠ Session тасарлаа — run түр зогссон. Нээгдсэн хөтөч дээр дахин нэвтэрнэ үү'
+                                     : '🔑 Нээгдсэн хөтөч дээр нэвтэрнэ үү';
+  $('loginReason').textContent = drop ? 'Нэвтэрмэгц тасарсан алхмаасаа автоматаар үргэлжилнэ.' : 'Нэвтэрмэгц сонгосон алхмууд автоматаар эхэлнэ.';
+  const end = Date.now() + ev.timeout_s * 1000;
+  clearInterval(loginTimer);
+  const tick = () => { const s = Math.max(0, Math.round((end - Date.now()) / 1000));
+    $('loginCd').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  tick(); loginTimer = setInterval(tick, 1000);
+  $('state').textContent = '· нэвтрэлт хүлээж байна';
+}
+function hideLogin() { clearInterval(loginTimer); stopAlert(); $('loginBox').classList.add('hidden'); }
+
+// ---- Pipeline-ын явц ----
+function renderPipe(pipeline) {
+  $('pipe').innerHTML = (pipeline || []).map((p, i) => `<li id="pipe-${i}" data-kind="${esc(p.kind)}"><div class="row1">${pill(p.status)}
+      <b>${esc(p.name)}</b><span class="msg">${esc(p.message || '')}</span></div>
+      ${p.kind === 'crud' ? `<ol id="flow-${esc(p.flow)}"></ol>` : ''}
+      ${p.kind === 'autocrud' ? `<div class="autoflows"></div>` : ''}</li>`).join('');
+}
+function flowOl(ev) {
+  let ol = document.getElementById('flow-' + ev.flow);
+  if (ol || !ev.auto) return ol;
+  // Автомат CRUD-ийн урсгалууд run-ы явцад (цэс сонгосны дараа) үүснэ — идэвхтэй autocrud алхамд нэмнэ
+  // (автомат CRUD / форм шалгалт) — одоо ажиллаж буй алхмын жагсаалтад нэмнэ
+  const lis = [...document.querySelectorAll('#pipe > li')].filter(li => li.querySelector('.autoflows'));
+  const cur = lis.find(li => li.querySelector('.pill.running')) || lis.pop();
+  const box = cur && cur.querySelector('.autoflows');
+  if (!box) return null;
+  const d = document.createElement('div'); d.style.marginTop = '6px';
+  d.innerHTML = `<b style="font-size:12px">${esc(ev.flow.replace(/^(auto|form): /, ''))}</b>`;
+  ol = document.createElement('ol'); ol.id = 'flow-' + ev.flow; d.appendChild(ol); box.appendChild(d);
+  return ol;
+}
+// ---- Smoke-ийн дараах форм шалгалтын цэсийн сонголт (модулиар бүлэглэсэн) ----
+function renderFormSel(menus) {
+  $('formSelInfo').textContent = `${menus.length} цэс (Нэмэх/Засах товчтой) илэрлээ`;
+  const by = {};
+  for (const m of menus) (by[m.module] = by[m.module] || []).push(m);
+  $('formMenus').innerHTML = Object.entries(by).map(([mod, ms]) => `<details open style="margin:6px 0">
+    <summary><label style="display:inline;margin:0;color:var(--ink)"><input type="checkbox" class="formmod" data-mod="${esc(mod)}" checked>
+      <b>${esc(mod)}</b> <span class="muted">(${ms.length})</span></label></summary>
+    <div class="mods">${ms.map(m => `<label title="${esc(m.buttons.join(' · '))}"><input type="checkbox" class="formchk" data-mod="${esc(mod)}" value="${esc(m.key)}" checked>
+      <span>${esc(m.name)}${m.folder ? ` <span class="muted">(${esc(m.folder)})</span>` : ''}</span></label>`).join('')}</div></details>`).join('');
+  document.querySelectorAll('.formmod').forEach(c => c.onchange = () =>
+    document.querySelectorAll(`.formchk[data-mod="${CSS.escape(c.dataset.mod)}"]`).forEach(x => x.checked = c.checked));
+  $('allForm').checked = true;
+  loadFormNa(menus);
+  $('cardFormSel').classList.remove('hidden'); $('btnFormGo').disabled = false; $('btnFormSkip').disabled = false;
+  $('cardFormSel').scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+// Баг тест өгөгдөл («Тест өгөгдөл» хуудас) оруулсны дараа: өмнөх run-ий N/A цэсүүдийг л дахин шалгах
+async function loadFormNa(menus) {
+  $('formNaRow').classList.add('hidden');
+  try {
+    const u = $('url').value.trim();
+    const r = await (await fetch(`/api/form-na?url=${encodeURIComponent(u)}&exclude=${encodeURIComponent(runId || '')}`)).json();
+    const have = new Set(menus.map(m => m.key));
+    const keys = (r.keys || []).filter(k => have.has(k));
+    if (!keys.length) return;
+    $('formNaInfo').textContent = `${keys.length} цэс (run ${r.run_id}${r.version ? ', ' + r.version : ''})`;
+    $('btnFormNa').onclick = () => {
+      const want = new Set(keys);
+      document.querySelectorAll('.formchk').forEach(c => c.checked = want.has(c.value));
+      document.querySelectorAll('.formmod').forEach(c => c.checked = false);
+      $('allForm').checked = false;
+    };
+    $('formNaRow').classList.remove('hidden');
+  } catch (e) {}
+}
+async function sendFormSel(keys) {
+  $('btnFormGo').disabled = true; $('btnFormSkip').disabled = true;
+  await fetch(`/api/runs/${runId}/form-select`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({menus: keys})});
+  $('cardFormSel').classList.add('hidden');
+}
+$('allForm').onchange = () => document.querySelectorAll('.formchk, .formmod').forEach(c => c.checked = $('allForm').checked);
+$('btnFormGo').onclick = () => {
+  const keys = [...document.querySelectorAll('.formchk:checked')].map(c => c.value);
+  if (!keys.length && !confirm('Цэс сонгоогүй байна — форм шалгалтыг алгасах уу?')) return;
+  sendFormSel(keys);
+};
+$('btnFormSkip').onclick = () => sendFormSel([]);
+
+// ---- Smoke-ийн дараах автомат CRUD цэсийн сонголт ----
+function renderCrudSel(menus) {
+  $('crudSelInfo').textContent = `${menus.length} цэс (Нэмэх + Устгах товчтой) илэрлээ`;
+  $('crudMenus').innerHTML = menus.map(m => `<label title="${esc(m.buttons.join(' · '))}"><input type="checkbox" class="crudchk" value="${esc(m.key)}">
+    <span>${esc(m.name)} <span class="muted">(${esc(m.module)}${m.folder ? ' › ' + esc(m.folder) : ''})</span></span></label>`).join('');
+  $('allCrud').checked = false;
+  $('cardCrudSel').classList.remove('hidden'); $('btnCrudGo').disabled = false; $('btnCrudSkip').disabled = false;
+  $('cardCrudSel').scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+async function sendCrudSel(keys) {
+  $('btnCrudGo').disabled = true; $('btnCrudSkip').disabled = true;
+  await fetch(`/api/runs/${runId}/crud-select`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({menus: keys})});
+  $('cardCrudSel').classList.add('hidden');
+}
+$('allCrud').onchange = () => document.querySelectorAll('.crudchk').forEach(c => c.checked = $('allCrud').checked);
+$('btnCrudGo').onclick = () => {
+  const keys = [...document.querySelectorAll('.crudchk:checked')].map(c => c.value);
+  if (!keys.length && !confirm('Цэс сонгоогүй байна — автомат CRUD-ийг алгасах уу?')) return;
+  sendCrudSel(keys);
+};
+$('btnCrudSkip').onclick = () => sendCrudSel([]);
+function updStage(ev) {
+  const li = $('pipe-' + ev.index); if (!li) return;
+  li.querySelector('.pill').outerHTML = pill(ev.state);
+  li.querySelector('.msg').textContent = ev.message || '';
+}
+function updFlowStep(ev) {
+  // Форм шалгалтын цэс бүрийн алхмыг (олон зуун цэс) «Явц» картанд жагсаахгүй — log болон явцын мөрөнд л харагдана
+  if (String(ev.flow || '').startsWith('form: ')) return;
+  const ol = flowOl(ev); if (!ol) return;
+  let li = ol.querySelector(`[data-i="${ev.index}"]`);
+  if (!li) { li = document.createElement('li'); li.dataset.i = ev.index; ol.appendChild(li); }
+  li.innerHTML = `${pill(ev.state)} ${esc(ev.name)}${ev.message ? ` <span class="muted">— ${esc(ev.message)}</span>` : ''}`;
+}
+
+$('navRun').onclick = () => { show('pageRun'); };
+$('navHist').onclick = () => { show('pageHist'); loadHistory(); };
+function show(p) { for (const id of ['pageRun','pageHist']) $(id).classList.toggle('hidden', id !== p);
+  $('navRun').classList.toggle('on', p === 'pageRun'); $('navHist').classList.toggle('on', p === 'pageHist'); }
+
+$('url').addEventListener('change', async () => {
+  const u = $('url').value.trim(); if (!u) return;
+  try { const r = await (await fetch('/api/check-url?url=' + encodeURIComponent(u))).json();
+    $('urlWarn').textContent = r.warning || ''; if (!$('project').value) $('project').placeholder = r.project; } catch (e) {}
+  if ($('stAuto').checked) loadMenus();
+  loadRecorded();
+});
+
+$('btnStart').onclick = async () => {
+  const steps = [];
+  if ($('stSmoke').checked) steps.push({kind: 'smoke', modules: null});
+  if ($('stForm').checked) {
+    if (!$('stSmoke').checked) { $('startMsg').textContent = 'Форм шалгалт smoke-ийн бүртгэсэн цэсүүд дээр ажилладаг — Smoke-ийг асаана уу.'; return; }
+    steps.push({kind: 'formcheck', menus: null});
+  }
+  if ($('stAuto').checked) {
+    if ($('autoAfter').checked) {
+      if (!$('stSmoke').checked) { $('startMsg').textContent = 'Автомат CRUD-ийн цэсийг smoke-ийн дараа сонгох бол Smoke-ийг асаана уу (эсвэл өмнөх бүртгэлээс сонгоно уу).'; return; }
+      steps.push({kind: 'autocrud', menus: null});
+    } else {
+      const menus = [...document.querySelectorAll('.menuchk:checked')].map(c => c.value);
+      if (!menus.length) { $('startMsg').textContent = 'Автомат CRUD хийх цэсээ сонгоно уу.'; return; }
+      steps.push({kind: 'autocrud', menus});
+    }
+  }
+  for (const c of document.querySelectorAll('.recchk:checked')) steps.push({kind: 'crud', flow: c.value});
+  if (!steps.length) { $('startMsg').textContent = 'Нэвтрэхээс гадна дор хаяж нэг алхам сонгоно уу.'; return; }
+  startRun(steps);
+};
+
+let runUrl = '';
+async function startRun(steps, url) {
+  const version = $('version').value.trim(), tester = $('tester').value.trim();
+  const isRecord = steps.length === 1 && steps[0].kind === 'record';
+  if (!isRecord && (!version || !tester)) {
+    $('startMsg').textContent = 'Тестлэх хувилбар болон тест гүйцэтгэгчийн нэрийг оруулна уу.';
+    (!version ? $('version') : $('tester')).focus(); return;
+  }
+  try { localStorage.setItem('ssg_people', JSON.stringify({tester, qa_lead: $('qa_lead').value.trim()})); } catch (e) {}
+  const body = { url: url || $('url').value.trim() || runUrl, project: $('project').value.trim(), qa_lead: $('qa_lead').value.trim(),
+    version, tester,
+    wait_ms: +$('wait_ms').value || 3000, check_risky: $('check_risky').checked,
+    confirm_failures: $('confirm').checked, select_modules: $('select_modules').checked, steps,
+    cdp: $('useCdp').checked };
+  if (!body.url) { $('startMsg').textContent = 'URL-аа оруулна уу.'; return; }
+  runUrl = body.url;
+  $('btnStart').disabled = true;
+  const res = await fetch('/api/runs', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if (!res.ok) { let t = await res.text(); try { t = JSON.parse(t).detail || t; } catch (e) {}
+    $('startMsg').textContent = 'Алдаа: ' + t; $('btnStart').disabled = false; return; }
+  const r = await res.json(); runId = r.id;
+  $('startMsg').textContent = `Run ${r.id} · ${r.project} ${r.version} · run_tag ${r.run_tag}` + (r.warning ? ' · ⚠ ' + r.warning : '');
+  for (const id of ['cardDisc','cardRes','cardCrudSel','cardFormSel']) $(id).classList.add('hidden');
+  $('cardProg').classList.remove('hidden'); $('log').innerHTML = ''; lastIdx = 0;
+  renderPipe(r.pipeline); hideLogin();
+  $('bar').style.width = '0'; $('progTxt').textContent = '0/0'; $('current').textContent = '—';
+  $('btnStop').disabled = false; $('btnStop').textContent = 'Зогсоох'; $('lastErr').textContent = '—';
+  listen();
+};
+
+function markFinished(status) {
+  $('btnStart').disabled = false;
+  $('state').textContent = status === 'cancelled' ? '· зогсоосон' : '· дууслаа';
+  $('btnStop').disabled = true; $('btnStop').textContent = 'Зогссон';
+  if (status === 'cancelled' && (!$('lastErr').textContent || $('lastErr').textContent === '—')) {
+    $('lastErr').textContent = 'Хэрэглэгч зогсоолоо';
+  }
+}
+
+function listen() {
+  if (es) es.close();
+  es = new EventSource(`/api/runs/${runId}/events?since=${lastIdx}`);
+  es.onmessage = (m) => { lastIdx = +m.lastEventId || lastIdx + 1; handle(JSON.parse(m.data)); };
+  es.onerror = () => { es.close(); setTimeout(async () => {
+      const r = await (await fetch('/api/runs/' + runId)).json();
+      if (r.live) { listen(); return; }
+      markFinished(r.status); $('cardDisc').classList.add('hidden');
+      if (r.summary) showResult(r.summary, r.status, r.error);
+  }, 1500); };
+}
+
+function logLine(ev) {
+  const el = $('log'); const d = document.createElement('div'); d.className = ev.level || '';
+  d.textContent = (ev.at ? ev.at.slice(11) + ' ' : '') + ev.msg; el.appendChild(d);
+  while (el.children.length > 50) el.removeChild(el.firstChild);   // сүүлийн 50 мөр
+  el.scrollTop = el.scrollHeight;
+}
+
+function handle(ev) {
+  if (ev.type === 'log') logLine(ev);
+  else if (ev.type === 'status') { $('state').textContent = '· ' + (STATES[ev.state] || ev.state); }
+  else if (ev.type === 'discovery') { discovered = ev.modules; renderMods(ev); }
+  else if (ev.type === 'progress') {
+    $('progLbl').textContent = ev.stage === 'formcheck' ? 'Форм шалгалтын явц:' : 'Smoke-ийн явц:';
+    $('bar').style.width = (ev.i / ev.n * 100).toFixed(1) + '%'; $('progTxt').textContent = `${ev.i}/${ev.n}`;
+    $('eta').textContent = ev.eta_s ? `үлдсэн ≈ ${Math.floor(ev.eta_s/60)} мин ${ev.eta_s%60} сек` : '';
+    $('current').textContent = ev.current; $('cPass').textContent = ev.counts.Pass || 0; $('cFail').textContent = ev.counts.Fail || 0;
+    $('cBlocked').textContent = ev.counts.Blocked || 0; $('cLogout').textContent = ev.logouts; $('cCrash').textContent = ev.crashes;
+    $('lastErr').textContent = ev.last_error || '—';
+  }
+  else if (ev.type === 'stage') updStage(ev);
+  else if (ev.type === 'flow_step') updFlowStep(ev);
+  else if (ev.type === 'crud_candidates') renderCrudSel(ev.menus);
+  else if (ev.type === 'form_candidates') renderFormSel(ev.menus);
+  else if (ev.type === 'rec_event') {
+    const li = document.createElement('li'); li.textContent = ev.text; $('recEvents').appendChild(li);
+    $('recEvents').scrollTop = $('recEvents').scrollHeight;
+    $('recTitle').textContent = 'Бичиж байна… хөтөч дээр урсгалаа хийнэ үү';
+  }
+  else if (ev.type === 'rec_done') showRecording(ev);
+  else if (ev.type === 'waiting_login') showLogin(ev);
+  else if (ev.type === 'login_ok') { hideLogin(); $('state').textContent = '· нэвтэрлээ'; }
+  else if (ev.type === 'session_lost') {
+    clearInterval(loginTimer); $('loginCd').textContent = '';
+    $('loginBox').classList.remove('hidden'); $('loginBox').classList.add('drop');
+    $('loginTitle').textContent = '⛔ Дахин нэвтрэлтийн хугацаа хэтэрлээ — үлдсэн алхмууд Blocked';
+    $('loginReason').textContent = ev.reason || '';
+  }
+  else if (ev.type === 'error') logLine({level:'error', msg: ev.msg});
+  else if (ev.type === 'done') {
+    es && es.close(); markFinished(ev.status); clearInterval(loginTimer); $('cardCrudSel').classList.add('hidden');
+    $('cardFormSel').classList.add('hidden');
+    if (!$('loginBox').classList.contains('drop')) hideLogin();
+    $('cardDisc').classList.add('hidden');
+    if (ev.summary && ev.summary.recording) {
+      if (ev.summary.recording.yaml) showRecording(ev.summary.recording);
+      $('cardProg').classList.add('hidden');
+      return;
+    }
+    showResult(ev.summary, ev.status, ev.error);
+  }
+}
+
+function renderMods(ev) {
+  $('discInfo').textContent = `${ev.modules.length} модуль, нийт ${ev.total} цэс илэрлээ.`;
+  $('mods').innerHTML = ev.modules.map(m => `<label><input type="checkbox" class="mod" value="${esc(m.name)}" checked> ${esc(m.name)} <span class="muted">(${m.count})</span></label>`).join('');
+  $('cardDisc').classList.remove('hidden'); $('btnSelect').disabled = false;
+}
+$('allMods').onchange = () => document.querySelectorAll('.mod').forEach(c => c.checked = $('allMods').checked);
+$('btnSelect').onclick = async () => {
+  const mods = [...document.querySelectorAll('.mod:checked')].map(c => c.value);
+  const all = mods.length === discovered.length;
+  await fetch(`/api/runs/${runId}/select`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({modules: all ? null : mods})});
+  $('btnSelect').disabled = true; $('cardDisc').classList.add('hidden');
+};
+$('btnStop').onclick = async () => {
+  if (!runId || !confirm('Run-ыг зогсоох уу? Тэр хүртэлх үр дүнгээр тайлан гарна.')) return;
+  $('btnStop').disabled = true; $('btnStop').textContent = 'Зогсож байна…';
+  $('state').textContent = '· зогсож байна…';
+  await fetch(`/api/runs/${runId}/stop`, {method:'POST'});
+};
+
+let TCS = [];
+function showResult(s, status, error) {
+  $('cardRes').classList.remove('hidden');
+  $('resWarn').textContent = error ? '⚠ ' + error : (status === 'cancelled' ? 'Run зогсоогдсон — хэсэгчилсэн үр дүн.' : '');
+  if (!s) return;
+  if (s.decision === 'INCOMPLETE') {
+    $('banner').className = 'banner incomplete';
+    $('banner').innerHTML = '⏸ ХЭСЭГЧИЛСЭН' + `<small>${esc(s.reasons.join(' · '))}</small>`;
+  } else {
+    const go = s.decision === 'GO';
+    $('banner').className = 'banner ' + (go ? 'go' : 'nogo');
+    $('banner').innerHTML = (go ? '✅ GO' : '❌ NO-GO') + `<small>${esc(go ? 'Бүх нөхцөлийг хангасан' : s.reasons.join(' · '))}</small>`;
+  }
+  $('resPipe').classList.toggle('hidden', !(s.pipeline && s.pipeline.length));
+  $('resPipe').innerHTML = (s.pipeline || []).map(p => `<li><div class="row1">${pill(p.status)} <b>${esc(p.name)}</b>
+    <span class="msg">${esc(p.message || '')}</span></div></li>`).join('');
+  const st = s.stats, bc = s.bug_counts;
+  $('resKpis').innerHTML = [['Pass Rate', st.pass_rate + '%'], ['Нийт TC', st.total], ['Pass', st.pass, 'pass'], ['Fail', st.fail, 'fail'],
+    ['Blocked', st.blocked, 'blocked'], ['🔴 Critical', bc.critical], ['🟡 Major', bc.major], ['🟢 Minor', bc.minor]]
+    .map(([k, v, c]) => `<div class="kpi"><b class="${c || ''}">${v}</b><small>${k}</small></div>`).join('');
+  for (const [id, k] of [['dlX','xlsx'],['dlD','docx'],['dlS','shots'],['dlR','raw'],['dlL','log'],['dlY','draft']]) $(id).href = `/runs/${runId}/download/${k}`;
+  $('dlY').classList.toggle('hidden', !s.draft);
+  $('formDl').classList.toggle('hidden', !s.form);
+  const rest = (s.resume && s.resume.formcheck) || [];
+  $('resumeBox').classList.toggle('hidden', !rest.length);
+  if (rest.length) {
+    $('resumeTxt').textContent = `⏸ Session тасарсан/зогсоосны улмаас форм шалгалтын ${rest.length} цэс ажиллаагүй.`;
+    $('btnResume').onclick = () => startRun([{kind: 'formcheck', menus: rest}]);
+  }
+  if (s.form) {
+    $('dlFX').href = `/runs/${runId}/download/form_xlsx`; $('dlFD').href = `/runs/${runId}/download/form_docx`;
+    $('formInfo').textContent = `${s.form.menus} цэс · ${s.form.tcs} TC (Pass ${s.form.pass} / Fail ${s.form.fail} / Blocked ${s.form.blocked}) · ${s.form.bugs} bug`;
+  }
+  $('bugRows').innerHTML = s.bugs.length ? s.bugs.map(b => `<tr><td><b>${b.id}</b></td><td class="sev">${esc(b.severity)}</td>
+    <td>${esc(b.title)}${b.confirmed ? `<div class="muted">${esc(b.confirmed)}</div>` : ''}${b.security ? `<div class="warn">${esc(b.security)}</div>` : ''}
+    ${b.stack ? `<pre class="stack">${esc(b.stack)}</pre>` : ''}</td>
+    <td>${esc(b.tcs.slice(0, 12).join(', '))}${b.tcs.length > 12 ? ` … (+${b.tcs.length - 12})` : ''}</td><td>${esc(b.fix)}</td>
+    <td>${b.screenshot ? `<a href="/runs/${runId}/shots/${b.screenshot.split('/').pop()}" target="_blank"><img class="shot" src="/runs/${runId}/shots/${b.screenshot.split('/').pop()}"></a>` : ''}</td></tr>`).join('')
+    : '<tr><td colspan="6" class="muted">Bug илрээгүй</td></tr>';
+  TCS = s.tcs;
+  const mods = [...new Set(TCS.map(t => t.module))];
+  $('fMod').innerHTML = '<option value="">Бүх модуль</option>' + mods.map(m => `<option>${esc(m)}</option>`).join('');
+  renderTcs();
+}
+function renderTcs() {
+  const r = $('fRes').value, m = $('fMod').value, q = $('fTxt').value.toLowerCase();
+  const rows = TCS.filter(t => (!r || t.result === r) && (!m || t.module === m) && (!q || (t.id + t.purpose + t.note).toLowerCase().includes(q)));
+  $('tcRows').innerHTML = rows.slice(0, 1500).map(t => `<tr><td>${t.id}</td><td>${esc(t.module)}</td><td>${esc(t.purpose)}</td><td class="sev">${esc(t.priority)}</td>
+    <td><span class="pill ${t.result}">${t.result}</span></td><td>${esc(t.bugs.join(', '))}</td><td>${esc(t.note)}</td></tr>`).join('');
+}
+for (const id of ['fRes','fMod']) $(id).onchange = renderTcs; $('fTxt').oninput = renderTcs;
+
+async function loadHistory() {
+  const rows = await (await fetch('/api/runs')).json();
+  $('histRows').innerHTML = rows.map(r => `<tr><td><input type="checkbox" class="hsel" value="${r.id}"></td><td>${esc((r.created_at||'').replace('T',' '))}</td>
+    <td>${esc(r.project)} ${esc(r.version_label)}</td><td>${esc(r.url)}</td><td>${esc(r.app_version || '—')}</td><td>${r.pass_rate ?? '—'}${r.pass_rate != null ? '%' : ''}</td>
+    <td>${r.decision ? (r.decision === 'GO' ? '✅ GO' : r.decision === 'INCOMPLETE' ? '⏸ Хэсэгчилсэн' : '❌ NO-GO') : '—'}</td><td>${esc(r.status)}</td>
+    <td>${r.status === 'done' || r.status === 'cancelled' ? `<a href="/runs/${r.id}/download/xlsx">xlsx</a> · <a href="/runs/${r.id}/download/docx">docx</a> · <a href="#" onclick="openRun('${r.id}');return false">харах</a>` : ''}</td>
+    <td><a href="#" class="warn" onclick="deleteRun('${r.id}');return false">Устгах</a></td></tr>`).join('')
+    || '<tr><td colspan="10" class="muted">Run алга</td></tr>';
+}
+async function openRun(id) { const r = await (await fetch('/api/runs/' + id)).json(); runId = id; show('pageRun'); showResult(r.summary, r.status, r.error); }
+async function deleteRun(id) {
+  if (!confirm('Энэ run-ыг бүр мөсөн устгах уу? Тайлан, screenshot, лог зэрэг бүх файл устна — буцаах боломжгүй.')) return;
+  const res = await fetch('/api/runs/' + id, {method: 'DELETE'});
+  if (!res.ok) { alert('Устгаж чадсангүй: ' + (await res.text())); return; }
+  loadHistory();
+}
+$('btnCmp').onclick = async () => {
+  const ids = [...document.querySelectorAll('.hsel:checked')].map(c => c.value);
+  if (ids.length !== 2) { $('cmp').innerHTML = '<span class="warn">Яг 2 run сонгоно уу.</span>'; return; }
+  const [b, a] = ids;   // жагсаалт шинээс хуучин руу
+  const res = await fetch(`/api/compare?a=${a}&b=${b}`);
+  if (!res.ok) { $('cmp').innerHTML = '<span class="warn">' + esc(await res.text()) + '</span>'; return; }
+  const c = await res.json();
+  const list = (xs) => xs.length ? '<ul>' + xs.map(x => `<li><b>${esc(x.severity)}</b> ${esc(x.title)}</li>`).join('') + '</ul>' : '<div class="muted">Байхгүй</div>';
+  $('cmp').innerHTML = `<div class="muted">Хуучин: ${esc(c.a.created_at)} (${c.a.pass_rate}%) → Шинэ: ${esc(c.b.created_at)} (${c.b.pass_rate}%)</div>
+    <h3 class="fail">Шинэ bug (${c.new.length})</h3>${list(c.new)}<h3 class="pass">Засагдсан bug (${c.fixed.length})</h3>${list(c.fixed)}
+    <h3>Хэвээр байгаа (${c.still.length})</h3>${list(c.still)}`;
+};
+</script>
+</body>
+</html>

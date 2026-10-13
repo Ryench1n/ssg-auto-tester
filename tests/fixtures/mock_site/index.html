@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<title>Mock SmartApp</title>
+<script src="/config.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; }
+  .modulenavbar { display: flex; gap: 8px; background: #1e3a5f; padding: 8px; }
+  .modulenavbar .nav-container { color: #fff; padding: 6px 10px; cursor: pointer; }
+  .layout { display: flex; min-height: 500px; }
+  .mainnavbar { width: 260px; border-right: 1px solid #ccc; padding: 8px; }
+  [role=treeitem] { display: block; padding: 3px 6px; cursor: pointer; color: #222; text-decoration: none; }
+  [role=group] { padding-left: 14px; }
+  [role=group][hidden] { display: none; }
+  .content { flex: 1; padding: 8px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid #ccc; }
+  [role=tab] { padding: 4px 8px; border: 1px solid #ccc; }
+  [role=tab].dxbl-active { background: #e8f0fe; }
+  .dxbl-tabs-close-button { margin-left: 6px; cursor: pointer; }
+  .dxbl-modal { position: fixed; top: 120px; left: 35%; width: 360px; background: #fff;
+                border: 2px solid #c00; padding: 12px; z-index: 10; }
+  .dxbl-toast { position: fixed; bottom: 10px; right: 10px; background: #fee; padding: 8px; }
+  .login { width: 320px; margin: 80px auto; display: flex; flex-direction: column; gap: 8px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+/*
+ * DevExpress Blazor (SmartApp)-ийн DOM-ыг дуурайлгасан mock.
+ * Цэс бүр тодорхой алдааны сценарийг үзүүлнэ (tests/test_e2e.py-г үз).
+ */
+const TTL = window.MOCK_TTL_MS || 300000;
+const VERSION = 'v2.4.1.7';
+const MODULES = {
+  'Ерөнхий дэвтэр': [
+    {folder: 'Бүртгэл', fid: 'f-gl-1', items: [
+      {name: 'Журнал', href: '/gl/journal', kind: 'ok'},
+      {name: 'Дансны төлөвлөгөө', href: '/gl/accounts', kind: 'sql_modal'},
+      {name: 'Ерөнхий журнал', href: '/gl/general', kind: 'reload'},
+      {name: 'Мөнгөн гүйлгээ', href: '/gl/cash', kind: 'deploy'},
+      {name: 'Хоосон хуудас', href: '/gl/blank', kind: 'blank'},
+      {name: 'Консол анхааруулга', href: '/gl/console', kind: 'console'},
+    ]},
+    {folder: 'Тайлан', fid: 'f-gl-2', items: [
+      {name: 'Гүйлгээний тайлан', href: '/gl/report', kind: 'late_crash'},
+      {name: 'Робот (RPA)', href: '/gl/rpa', kind: 'asset404'},
+    ]},
+  ],
+  'Систем': [
+    {folder: 'Тохиргоо', fid: 'f-sys-1', items: [
+      {name: 'Хэрэглэгч', href: '/sys/users', kind: 'crash'},
+      {name: 'Эрх', href: '/sys/perm', kind: 'forbidden'},
+      {name: 'Роль', href: '/sys/roles', kind: 'ok'},
+      {name: 'Эрсдэлийн бүртгэл', href: '/sys/risk', kind: 'dx_modal'},
+      {name: 'Сесс шалгах', href: '/sys/session', kind: 'ok'},
+      {name: 'Дансны жагсаалт', href: '/gl/accounts', kind: 'sql_modal'},
+    ]},
+  ],
+};
+
+let dead = false;             // .NET runtime уналтын дараа UI хариу өгөхгүй
+// 'Эхлэл' — анхнаасаа нээлттэй, хаах товчтой таб (Restaurant-ийн "Систем" таб шиг): smoke хаах ёсгүй
+let tabs = [{name: 'Нүүр хуудас', protected: true}, {name: 'Эхлэл', initial: true}];
+let active = 'Нүүр хуудас';
+let currentModule = null;
+let expanded = {};
+
+const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstChild; };
+const loggedIn = () => {
+  const t = +sessionStorage.getItem('mock_login_at');
+  return t && (Date.now() - t) < TTL;
+};
+
+function go(path) { history.pushState({}, '', path); render(); }
+
+function render() {
+  const root = document.getElementById('root');
+  root.innerHTML = '';
+  if (location.pathname.startsWith('/auth/login') || !loggedIn()) {
+    if (!location.pathname.startsWith('/auth/login')) history.replaceState({}, '', '/auth/login');
+    root.appendChild($(`<form class="login" onsubmit="return doLogin(event)">
+      <h2>SmartApp нэвтрэх</h2><div>${VERSION}</div>
+      <input name="company" placeholder="Компани">
+      <input type="text" name="user" placeholder="Хэрэглэгч">
+      <input type="password" name="pwd" placeholder="Нууц үг">
+      <button type="submit">Нэвтрэх</button></form>`));
+    return;
+  }
+  const nav = $(`<div class="modulenavbar"></div>`);
+  for (const m of Object.keys(MODULES)) {
+    const el = $(`<div class="nav-container" title="${m}">${m}</div>`);
+    el.onclick = () => { if (dead) return; currentModule = m; render(); };
+    nav.appendChild(el);
+  }
+  root.appendChild(nav);
+  const layout = $(`<div class="layout"></div>`);
+  if (currentModule) {
+    const mn = $(`<div class="mainnavbar" role="tree"></div>`);
+    for (const f of MODULES[currentModule]) {
+      const fe = $(`<div role="treeitem" id="${f.fid}" aria-expanded="${!!expanded[f.fid]}">${f.folder}</div>`);
+      fe.onclick = () => { if (dead) return; expanded[f.fid] = !expanded[f.fid]; render(); };
+      mn.appendChild(fe);
+      const g = $(`<div role="group"></div>`);
+      if (!expanded[f.fid]) g.hidden = true;
+      for (const it of f.items) {
+        const a = $(`<a role="treeitem" parent-id="${f.fid}" href="${it.href}">${it.name}</a>`);
+        a.onclick = (e) => { e.preventDefault(); openItem(it); };
+        g.appendChild(a);
+      }
+      mn.appendChild(g);
+    }
+    layout.appendChild(mn);
+  }
+  const content = $(`<div class="content"></div>`);
+  const tb = $(`<div class="tabs" role="tablist"></div>`);
+  for (const t of tabs) {
+    const te = $(`<div role="tab" class="${t.name === active ? 'dxbl-active' : ''}"><span>${t.name}</span></div>`);
+    if (!t.protected) {
+      const x = $(`<span class="dxbl-tabs-close-button" aria-label="Close tab">×</span>`);
+      x.onclick = (e) => { e.stopPropagation(); closeTab(t); };
+      te.appendChild(x);
+    }
+    tb.appendChild(te);
+  }
+  content.appendChild(tb);
+  const body = tabs.find(t => t.name === active);
+  content.appendChild($(`<div class="tab-body">${body && body.blank ? '' : body && body.forbidden ?
+    'Sorry, you are not authorized to access this page' : (active + ' — жагсаалт')}</div>`));
+  layout.appendChild(content);
+  root.appendChild(layout);
+  if (body && body.modal) root.appendChild(body.modal);
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  await fetch('/api/login', {method: 'POST'});
+  sessionStorage.setItem('mock_login_at', String(Date.now()));
+  go('/greeting');
+  return false;
+}
+
+function addTab(t) { tabs.push(t); active = t.name; render(); }
+
+function closeTab(t) {
+  if (dead) return;
+  tabs = tabs.filter(x => x !== t);
+  active = tabs[tabs.length - 1].name;
+  render();
+  if (t.initial) fetch('/api/initial-closed');
+  if (t.lateCrash) {   // таб хаасны дараа хоцорч гарах ObjectDisposedException
+    setTimeout(() => {
+      console.error('Unhandled Exception: System.ObjectDisposedException: Cannot access a disposed object.\n' +
+                    '   at Smart.Accounting.Reports.TxnReport.Dispose()');
+      dead = true;
+    }, 400);
+  }
+}
+
+function openItem(it) {
+  if (dead) return;
+  if (!loggedIn()) {          // token сунгалт эвдэрсэн → login руу
+    sessionStorage.removeItem('mock_login_at');
+    location.assign('/auth/login');
+    return;
+  }
+  switch (it.kind) {
+    case 'ok':
+      addTab({name: it.name}); break;
+    case 'blank':          // таб нээгдсэн ч компонент юу ч зурсангүй (цагаан дэлгэц)
+      addTab({name: it.name, blank: true}); break;
+    case 'console':        // HR-ын DevExpress консол мессеж шиг — цэс өөрөө хэвийн
+      console.error('fail: DevExpress.Blazor.Internal.NestedSettingsHelper.SettingsRenderer[0]');
+      addTab({name: it.name}); break;
+    case 'asset404': {   // хуудас хэвийн нээгдэнэ, гэхдээ static CSS 404 (testbalancelite-ийн тайлан шиг)
+      addTab({name: it.name});
+      const l = document.createElement('link'); l.rel = 'stylesheet';
+      l.href = '/_content/Missing.Viewer/css/viewer.css?' + Date.now(); document.head.appendChild(l);
+      break;
+    }
+    case 'sql_modal': {
+      fetch('/api/fail').then(r => r.text());
+      const m = $(`<div class="dxbl-modal" role="dialog">
+        <div>Системийн алдаа</div>
+        <div>Invalid column name 'CostCenterId'.</div>
+        <button class="save">Хадгалах</button> <button class="ok">OK</button></div>`);
+      const t = {name: it.name, modal: m};
+      m.querySelector('.ok').onclick = () => { t.modal = null; render(); };
+      m.querySelector('.save').onclick = () => fetch('/api/mutate', {method: 'POST'});
+      addTab(t); break;
+    }
+    case 'reload':
+      location.reload(); break;
+    case 'deploy':
+      fetch('/api/deploy').then(async r => { await r.text(); if (r.ok) addTab({name: it.name}); }); break;
+    case 'late_crash':
+      addTab({name: it.name, lateCrash: true}); break;
+    case 'crash':
+      console.error('Unhandled Exception: System.NullReferenceException: Object reference not set to an instance of an object.\n' +
+                    '   at Smart.Core.Users.UserList.OnInitializedAsync()');
+      dead = true; break;
+    case 'dx_modal': {
+      // DevExpress DxPopup: role=dialog/.dxbl-modal-гүй, <dxbl-popup-root> дотор дэлгэц бүрхэх
+      // <dxbl-modal-root> — хаагдахгүй бол дараагийн цэсний click-ийг хаадаг.
+      addTab({name: it.name});
+      setTimeout(() => {
+        const pr = $(`<dxbl-popup-root role="region" aria-label="Dropdowns"><dxbl-modal-root
+            style="position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.3);display:block">
+          <div style="position:absolute;top:100px;left:30%;width:420px;background:#fff">
+            <div class="dxbl-popup-header"><span>Системийн алдаа</span>
+              <span class="dxbl-btn x" role="button" style="float:right;cursor:pointer">✕</span></div>
+            <div>Invalid column name 'RiskStatus'.</div>
+            <span class="dxbl-btn save" role="button">Хадгалах</span></div>
+        </dxbl-modal-root></dxbl-popup-root>`);
+        pr.querySelector('.x').onclick = () => pr.remove();
+        pr.querySelector('.save').onclick = () => fetch('/api/mutate', {method: 'POST'});
+        document.body.appendChild(pr);
+      }, 150);
+      break;
+    }
+    case 'forbidden':
+      addTab({name: '_403', forbidden: true}); break;
+  }
+}
+
+window.addEventListener('popstate', render);
+if (location.pathname === '/' && loggedIn()) history.replaceState({}, '', '/greeting');
+render();
+</script>
+</body>
+</html>

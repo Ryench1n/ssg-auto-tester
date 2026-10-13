@@ -1,0 +1,47 @@
+# testaccounting.smartapp.mn — ~970 цэсийн гар smoke тестээс сурсан тохиргоо
+risky_items: ["динамик тайлан", "Робот (RPA)"]
+skip_items: []
+priority:
+  critical_items: ["Нүүр хуудас"]
+
+# Component-based E2E урсгалууд — UI-ын «CRUD урсгал» карт эсвэл
+#   python -m app.flows --url ... --flow <нэр>
+# Нэвтрэлт ЗӨВХӨН гараар (нээгдсэн хөтөч дээр); `role` нь зөвхөн мэдээллийн чанартай.
+# code: TC-FLOW-<code>-<№> (заагаагүй бол нэрийн эхний үсгүүд: customer_group_crud → CGC)
+# ⚠ Формын талбарын нэрс ("Код", "Нэр") бодит сайт дээр анх ажиллуулахдаа баталгаажуулна.
+flows:
+  customer_group_crud:
+    steps:
+      - uses: auth.login
+        name: "Admin нэвтрэх"
+        with: {role: admin}
+      - uses: auth.expect_access
+        name: "Харилцагчийн бүлэг цэсэд хандах"
+        with: {menu: "Мастер дата / Өглөг авлага / Харилцагчийн бүлэг", allowed: true}
+      - uses: crud.create
+        name: "Харилцагчийн бүлэг бүртгэх"
+        with:
+          menu: "Мастер дата / Өглөг авлага / Харилцагчийн бүлэг"
+          fields: {"Код": "{run_tag}", "Нэр": "{run_tag} Тест бүлэг"}
+          key: "Нэр"
+          save_as: group_name
+      - uses: crud.search
+        name: "Бүртгэснээ хайж олох"
+        with: {text: "{group_name}"}
+      - uses: crud.update
+        name: "Нэрийг засах"
+        with:
+          find: "{group_name}"
+          fields: {"Нэр": "{run_tag} Засварласан бүлэг"}
+          key: "Нэр"
+          save_as: group_name
+      - uses: crud.search
+        name: "Засварыг шалгах"
+        with: {text: "{group_name}"}
+      - uses: crud.delete
+        name: "Цэвэрлэх (устгах)"
+        always: true
+        with: {find: "{group_name}"}
+      - uses: crud.search
+        name: "Устгагдсаныг шалгах"
+        with: {text: "{group_name}", expect: absent}

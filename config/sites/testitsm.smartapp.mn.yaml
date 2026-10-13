@@ -1,0 +1,8 @@
+# testitsm.smartapp.mn — SmartApp-ийн ижил framework гэж үзэв (default selector).
+# Модулийн нэр өөр байвал энд нэмнэ. Үл мэдэгдэх модульд товчлолыг автоматаар үүсгэнэ.
+module_codes:
+  "Хүсэлт": REQ
+  "Тасалдал": INC
+  "Өөрчлөлт": CHG
+  "Мэдлэгийн сан": KB
+risky_items: ["динамик тайлан", "Робот (RPA)"]

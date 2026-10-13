@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<title>Mock SmartApp CRUD</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; }
+  .modulenavbar { display: flex; gap: 8px; background: #1e3a5f; padding: 8px; }
+  .modulenavbar .nav-container { color: #fff; padding: 6px 10px; cursor: pointer; }
+  .layout { display: flex; min-height: 500px; }
+  .mainnavbar { width: 240px; border-right: 1px solid #ccc; padding: 8px; }
+  [role=treeitem] { display: block; padding: 3px 6px; cursor: pointer; color: #222; text-decoration: none; }
+  [role=group] { padding-left: 14px; }
+  [role=group][hidden] { display: none; }
+  .content { flex: 1; padding: 8px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid #ccc; }
+  [role=tab] { padding: 4px 8px; border: 1px solid #ccc; }
+  [role=tab].dxbl-active { background: #e8f0fe; }
+  .dxbl-tabs-close-button { margin-left: 6px; cursor: pointer; display: inline-block; width: 10px; height: 10px; background: #999; }
+  .dxbl-grid td { border: 1px solid #ddd; padding: 3px 6px; }
+  .dxbl-grid-selected-row { background: #cde; }
+  .dxbl-modal { position: fixed; top: 80px; left: 30%; width: 420px; background: #fff;
+                border: 2px solid #345; padding: 12px; z-index: 10; }
+  .dxbl-modal.err { border-color: #c00; z-index: 20; top: 140px; }
+  .dxbl-toast { position: fixed; bottom: 10px; right: 10px; background: #ffd; padding: 8px; }
+  .loading-indicator { position: fixed; top: 4px; right: 4px; }
+  .login { width: 320px; margin: 80px auto; display: flex; flex-direction: column; gap: 8px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+/* SmartApp шиг байнга нээлттэй хүсэлт (server longpoll=True үед) — 204 бол зогсоно */
+(async function poll() { try { const r = await fetch('/api/poll'); if (r.status === 200) setTimeout(poll, 0); } catch (e) {} })();
+/* DevExpress Blazor-тэй төстэй CRUD mock: toolbar (Нэмэх/Засах/Устгах), хайлттай grid,
+ * DxFormLayout маягийн popup форм, устгах баталгаажуулалт, 500 алдаа, validation toast. */
+const VERSION = 'v3.0.0.1';
+const MODULES = {
+  'Мастер дата': [{folder: 'Бүртгэл', fid: 'f-md-1', items: [
+    {name: 'Харилцагч', href: '/md/customers', kind: 'customers'},
+    {name: 'Бараа', href: '/md/items', kind: 'ok'},
+    {name: 'Ангилал', href: '/md/cats', kind: 'cats'},
+    {name: 'Бүлэг', href: '/md/groups', kind: 'groups'},
+    {name: 'Гүйлгээ', href: '/md/txn', kind: 'txn'},
+    {name: 'Журнал', href: '/md/journal', kind: 'journal'},
+    {name: 'Данс', href: '/md/accounts', kind: 'acct'},
+    /*EXTRA_ITEMS*/
+  ]}],
+};
+// Бүлэг: бодит SmartApp-ын баримт шиг — «Шинэ» шинэ ТАБ дээр формыг нээнэ (FormLayout caption-гүй,
+// шошго нь <span>). Клиент талд хадгална.
+let groups = [], gq = '', gsel = null, gseq = 0;
+let tabs = [{name: 'Нүүр хуудас', protected: true}];
+let active = 'Нүүр хуудас';
+let currentModule = null;
+const expanded = {};
+let query = '', rows = [], selected = null, loaded = false;
+
+const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstChild; };
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const role = () => localStorage.getItem('mock_role');
+
+async function api(method, url, body) {
+  const ld = $(`<div class="loading-indicator">Ачаалж байна</div>`);
+  document.body.appendChild(ld);
+  try {
+    const r = await fetch(url, {method, headers: {'Content-Type': 'application/json'},
+                                body: body ? JSON.stringify(body) : undefined});
+    const data = await r.json().catch(() => ({}));
+    return {ok: r.ok, status: r.status, data};
+  } finally { ld.remove(); }
+}
+
+function go(path) { history.pushState({}, '', path); render(); }
+
+function render() {
+  const root = document.getElementById('root');
+  root.innerHTML = '';
+  if (location.pathname.startsWith('/auth/login') || !role()) {
+    if (!location.pathname.startsWith('/auth/login')) history.replaceState({}, '', '/auth/login');
+    root.appendChild($(`<form class="login" onsubmit="return doLogin(event)">
+      <h2>SmartApp нэвтрэх</h2><div>${VERSION}</div>
+      <input type="text" name="user" placeholder="Хэрэглэгч">
+      <input type="password" name="pwd" placeholder="Нууц үг">
+      <div class="err-msg"></div>
+      <button type="submit">Нэвтрэх</button></form>`));
+    return;
+  }
+  const nav = $(`<div class="modulenavbar"></div>`);
+  for (const m of Object.keys(MODULES)) {
+    const el = $(`<div class="nav-container" title="${m}">${m}</div>`);
+    el.onclick = () => { currentModule = m; render(); };
+    nav.appendChild(el);
+  }
+  root.appendChild(nav);
+  const layout = $(`<div class="layout"></div>`);
+  if (currentModule) {
+    const mn = $(`<div class="mainnavbar" role="tree"></div>`);
+    for (const f of MODULES[currentModule]) {
+      const fe = $(`<div role="treeitem" id="${f.fid}" aria-expanded="${!!expanded[f.fid]}">${f.folder}</div>`);
+      fe.onclick = () => { expanded[f.fid] = !expanded[f.fid]; render(); };
+      mn.appendChild(fe);
+      const g = $(`<div role="group"></div>`);
+      if (!expanded[f.fid]) g.hidden = true;
+      for (const it of f.items) {
+        const a = $(`<a role="treeitem" parent-id="${f.fid}" href="${it.href}">${it.name}</a>`);
+        a.onclick = (e) => { e.preventDefault(); openItem(it); };
+        g.appendChild(a);
+      }
+      mn.appendChild(g);
+    }
+    layout.appendChild(mn);
+  }
+  const content = $(`<div class="content"></div>`);
+  const tb = $(`<div class="tabs" role="tablist"></div>`);
+  for (const t of tabs) {
+    const te = $(`<div role="tab" class="${t.name === active ? 'dxbl-active' : ''}"><span>${t.name}</span></div>`);
+    te.onclick = () => { active = t.name; render(); };
+    if (t.kind === 'group_form' || t.kind === 'timer' || t.kind === 'outage') {           // форм таб хаагдана (хадгалаагүй өөрчлөлт алга болно)
+      const x = $(`<span class="dxbl-tabs-close-button"></span>`);    // бодит DevExpress: icon (текстгүй)
+      x.onclick = (e) => { e.stopPropagation(); closeTab(t.name); };
+      te.appendChild(x);
+    }
+    tb.appendChild(te);
+  }
+  content.appendChild(tb);
+  const cur = tabs.find(t => t.name === active);
+  if (cur && cur.forbidden) content.appendChild($(`<div>Sorry, you are not authorized to access this page</div>`));
+  else if (cur && cur.kind === 'customers') content.appendChild(customersView());
+  else if (cur && cur.kind === 'cats') content.appendChild(catsView());
+  else if (cur && cur.kind === 'groups') content.appendChild(groupsView());
+  else if (cur && cur.kind === 'group_form') content.appendChild(groupFormView(cur));
+  else if (cur && cur.kind === 'txn') content.appendChild(txnView());
+  else if (cur && cur.kind === 'journal') content.appendChild(journalView());
+  else if (cur && cur.kind === 'acct') content.appendChild(acctView());
+  else if (cur && cur.kind === 'robot') content.appendChild(robotView());
+  else if (cur && cur.kind === 'jobs') content.appendChild(jobsView());
+  else if (cur && cur.kind === 'invoice') content.appendChild(invoiceView());
+  else if (cur && cur.kind === 'act') content.appendChild(actView());
+  else if (cur && cur.kind === 'timer') content.appendChild(timerView());
+  else if (cur && cur.kind === 'outage') content.appendChild(timerView());
+  else if (cur && cur.kind === 'alias') content.appendChild(timerView());
+  else if (cur && cur.kind === 'dform') content.appendChild(dformView());
+  else if (cur && cur.kind === 'md') content.appendChild(mdView());
+  else if (cur && cur.kind === 'dbset') content.appendChild(dbsetView());
+  else content.appendChild($(`<div class="tab-body">${active}</div>`));
+  layout.appendChild(content);
+  root.appendChild(layout);
+}
+
+function customersView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar">
+      <button class="dxbl-btn add">Нэмэх</button>
+      <button class="dxbl-btn edit" ${selected ? '' : 'disabled'}>Засах</button>
+      <button class="dxbl-btn del" ${selected ? '' : 'disabled'}>Устгах</button>
+      <button class="dxbl-btn prn" title="Хэвлэх"><i class="fa fa-print"></i></button>
+      <button class="dxbl-btn xls">Excel</button>
+      <button class="dxbl-btn imp">Excel-ээс импорт</button>
+      <span class="dxbl-grid-search-box"><input placeholder="Хайх..." value="${esc(query)}"></span></div>`);
+  bar.querySelector('.prn').onclick = () => window.print();
+  bar.querySelector('.xls').onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['code;name'], {type: 'text/csv'}));
+    a.download = 'customers.csv'; document.body.appendChild(a); a.click(); a.remove();
+  };
+  bar.querySelector('.imp').onclick = () => fetch('/api/untagged-touched', {method: 'POST', body: '{}'});
+  bar.querySelector('.add').onclick = () => openForm(null);
+  bar.querySelector('.edit').onclick = () => openForm(rows.find(r => r.id === selected));
+  bar.querySelector('.del').onclick = confirmDelete;
+  const inp = bar.querySelector('input');
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { query = inp.value; load(); } };
+  v.appendChild(bar);
+  const t = $(`<table class="dxbl-grid"><thead><tr><th>Код</th><th>Нэр</th><th>Регистр</th><th>Утас</th></tr></thead><tbody></tbody></table>`);
+  for (const r of rows) {
+    const tr = $(`<table><tr role="row" class="${r.id === selected ? 'dxbl-grid-selected-row' : ''}">
+      <td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${esc(r.reg)}</td><td>${esc(r.phone)}</td></tr></table>`)
+      .querySelector('tr');
+    tr.onclick = () => { selected = r.id; render(); };
+    tr.ondblclick = () => { selected = r.id; openForm(r); };
+    t.querySelector('tbody').appendChild(tr);
+  }
+  v.appendChild(t);
+  return v;
+}
+
+const CATS = [{name: 'Үндсэн ангилал', type: 'Бараа', date: '2025-03-01'}];
+let catFrom = new Date().toISOString().slice(0, 10);
+/* Ангилал (бодит SmartApp-ын Цалин модуль шиг):
+ *  - «Огноо *» — DateEdit (slDate, role=combobox, ▾ товчтой) → сонголтын талбар БИШ, огноо бичнэ
+ *  - «Төрөл *» — lookup "..." — цонх нээгдэхэд «Системийн алдаа — Invalid column name 'ActiveStatus'.»
+ *    (өгөгдлийн сангийн bug) → «утга олдсонгүй/шалгаж чадаагүй» биш Fail (bug) гэж мэдээлэх ёстой. */
+function catsView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn add">Нэмэх</button>
+      <button class="dxbl-btn del" disabled>Устгах</button></div>`);
+  bar.querySelector('.add').onclick = () => {
+    const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Ангилал</div>
+      <div class="dxbl-fl">${field('Ангилал', 'cat', '')}
+      <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Огноо *:</label><div class="dxbl-fl-ctrl">
+        <div class="dxbl-text-edit slDate"><input type="text" role="combobox" name="date"><button class="dxbl-btn">▾</button></div></div></div>
+      <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Төрөл *:</label><div class="dxbl-fl-ctrl">
+        <input name="type"><button class="dxbl-btn lk">...</button></div></div>
+      <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Төлөв:</label><div class="dxbl-fl-ctrl">
+        <span class="dxbl-combobox"><input name="st" role="combobox" readonly><button class="dxbl-btn dd">▾</button></span></div></div></div>
+      <button class="dxbl-btn save">Хадгалах</button> <button class="dxbl-btn cancel">Болих</button></div>`);
+    m.querySelector('.cancel').onclick = () => m.remove();
+    m.querySelector('.save').onclick = () => toast('Төрөл сонгоно уу');
+    m.querySelector('.dd').onclick = () => {      // ▾ — нээлттэй бол хаана (toggle)
+      const open = document.querySelector('.st-list');
+      if (open) { open.remove(); return; }
+      const lb = $(`<div class="dxbl-listbox-popup st-list"><div class="dxbl-list-box-item">Идэвхтэй</div>
+        <div class="dxbl-list-box-item">Идэвхгүй</div></div>`);
+      lb.querySelectorAll('.dxbl-list-box-item').forEach(o => o.onclick = () => {
+        m.querySelector('[name=st]').value = o.textContent; lb.remove(); });
+      document.body.appendChild(lb);
+    };
+    m.querySelector('.lk').onclick = () => {
+      const lk = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Төрөл
+          <button class="dxbl-popup-header-button">×</button></div>
+        <div class="dxbl-toolbar"><button class="dxbl-btn">Сонгох</button></div>
+        <dxbl-grid class="dxbl-grid" style="display:block"><table role="treegrid"><tbody>
+          <tr><td>Түр хүлээнэ үү...</td></tr></tbody></table></dxbl-grid></div>`);
+      lk.querySelector('.dxbl-popup-header-button').onclick = () => lk.remove();
+      document.body.appendChild(lk);
+      setTimeout(() => { lk.querySelector('tbody').innerHTML = '<tr><td>Бичлэг олдсонгүй</td></tr>';
+                         errorModal("Invalid column name 'ActiveStatus'."); }, 800);
+    };
+    document.body.appendChild(m);
+  };
+  v.appendChild(bar);
+  /* Бодит SmartApp-ын жагсаалт шиг «Шүүлтийн нөхцөл»: анхдагчаар өнөөдрөөс хойш (энэ улирал) шүүгдэнэ —
+   * өмнө бүртгэгдсэн бичлэг харагдахгүй; эхлэх огноог ухрааж «Шүүх» дарвал гарна. */
+  const flt = $(`<div class="filter">Огноо <span class="dxbl-text-edit slDate"><input name="from" value="${catFrom}"></span>
+      <button class="dxbl-btn flt">Шүүх</button></div>`);
+  flt.querySelector('.flt').onclick = () => { catFrom = flt.querySelector('[name=from]').value; render(); };
+  v.appendChild(flt);
+  const t = $(`<table class="dxbl-grid"><thead><tr><th>Ангилал</th><th>Төрөл</th><th>Огноо</th></tr></thead><tbody></tbody></table>`);
+  for (const c of CATS.filter(c => c.date >= catFrom)) {
+    const tr = $(`<table><tr role="row"><td>${esc(c.name)}</td><td>${esc(c.type)}</td><td>${c.date}</td></tr></table>`).querySelector('tr');
+    tr.onclick = () => {            // мөр дарахад бичлэг засварын горимд нээгдэнэ (уншилт)
+      const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Ангилал</div>
+        <div class="dxbl-fl">${field('Ангилал', 'cat', c.name)}</div><button class="dxbl-btn cancel">Болих</button></div>`);
+      m.querySelector('.cancel').onclick = () => m.remove();
+      document.body.appendChild(m);
+    };
+    t.querySelector('tbody').appendChild(tr);
+  }
+  v.appendChild(t);
+  return v;
+}
+
+function closeTab(name) {
+  const closing = tabs.find(t => t.name === name);
+  if (closing && closing.kind === 'outage') {
+    // Тест орчны тасалдал: таб хаагдсаны дараа сервертэй холбоо тасарч цэсний мод алга болно (runtime амьд) —
+    // хуудсыг дахин ачаалбал сэргэнэ
+    setTimeout(() => { broken = true; document.getElementById('root').innerHTML = ''; }, 300);
+  }
+  if (closing && closing.kind === 'timer') {
+    // HR «Робот (RPA)»: хуудасны timer dispose хийгдэхгүй — таб хаагдсаны дараа ажиллаж .NET runtime-ийг унагана
+    setTimeout(() => {
+      console.error("Unhandled Exception:\nSystem.ObjectDisposedException: ObjectDisposed_Generic\n" +
+        "   at DevExpress.Blazor.Grid.Internal.DxGridBase.get_DataProvider()\n" +
+        "   at SmartSoftware.WAF.UI.Pages.TimerList.vYxCRqTyVim(Object  )");
+      console.error("MONO_WASM: Assert failed: .NET runtime already exited with 1");
+      broken = true;
+      document.getElementById('root').innerHTML = '';     // унасан апп: цэс/таб бүгд алга
+    }, 400);
+  }
+  tabs = tabs.filter(t => t.name !== name);
+  if (active === name) active = tabs.some(t => t.name === 'Бүлэг') ? 'Бүлэг' : tabs[tabs.length - 1].name;
+  render();
+}
+
+function groupsView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn add">Шинэ</button>
+      <button class="dxbl-btn edit" ${gsel ? '' : 'disabled'}>Засах</button>
+      <button class="dxbl-btn del" ${gsel ? '' : 'disabled'}>Устгах</button>
+      <span class="dxbl-grid-search-box"><input placeholder="Хайх..." value="${esc(gq)}"></span></div>`);
+  bar.querySelector('.add').onclick = () => openGroupForm(null);
+  bar.querySelector('.edit').onclick = () => openGroupForm(groups.find(g => g.id === gsel));
+  bar.querySelector('.del').onclick = () => {
+    const g = groups.find(x => x.id === gsel); if (!g) return;
+    const m = $(`<div class="dxbl-modal" role="dialog"><div>Устгахдаа итгэлтэй байна уу?</div><div>${esc(g.name)}</div>
+      <button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
+    m.querySelector('.no').onclick = () => m.remove();
+    m.querySelector('.yes').onclick = () => { m.remove(); groups = groups.filter(x => x.id !== g.id); gsel = null; render(); };
+    document.body.appendChild(m);
+  };
+  const inp = bar.querySelector('input');
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { gq = inp.value; render(); } };
+  v.appendChild(bar);
+  const t = $(`<table class="dxbl-grid"><thead><tr><th>Бүлгийн нэр</th><th>Тайлбар</th></tr></thead><tbody></tbody></table>`);
+  for (const g of groups.filter(g => !gq || (g.name + ' ' + g.desc).toLowerCase().includes(gq.toLowerCase()))) {
+    const tr = $(`<table><tr role="row" class="${g.id === gsel ? 'dxbl-grid-selected-row' : ''}">
+      <td>${esc(g.name)}</td><td>${esc(g.desc)}</td></tr></table>`).querySelector('tr');
+    // SmartApp-ын баримт шиг: мөр дарахад сонгогдож, форм ШИНЭ ТАБ дээр нээгдэнэ
+    tr.onclick = () => { gsel = g.id; openGroupForm(g); };
+    t.querySelector('tbody').appendChild(tr);
+  }
+  v.appendChild(t);
+  return v;
+}
+
+function openGroupForm(rec) {
+  const name = rec ? `Бүлэг: ${rec.name}` : 'Бүлэг: шинэ';
+  if (!tabs.some(t => t.name === name)) tabs.push({name, kind: 'group_form', rec});
+  active = name;
+  render();
+}
+
+function groupFormView(tab) {
+  const r = tab.rec || {};
+  const v = $(`<div class="tab-body frm">
+      <div class="frm-row"><span class="frm-lbl">Бүлгийн нэр</span><input name="gname" value="${esc(r.name || '')}"></div>
+      <div class="frm-row"><span class="frm-lbl">Тайлбар</span><input name="gdesc" value="${esc(r.desc || '')}"></div>
+      <div class="frm-row"><span class="frm-lbl">Эцэг бүлэг *</span><span class="lk"><input name="gparent" value="${esc(r.parent || '')}"></span>
+        <button class="dxbl-btn lkbtn">...</button></div>
+      <div class="frm-row"><span class="frm-lbl">Бүлгийн төрөл *</span><span class="lk"><input name="gtype" value="${esc(r.type || '')}"></span>
+        <button class="dxbl-btn lkbtn2">...</button></div>
+      <button class="dxbl-btn gsave">Хадгалах</button></div>`);
+  // Зөвхөн модтой lookup (SmartApp-ын Дансны бүлэг шиг) — «Бүх» үндсэн зангилаа биш навчийг сонгох ёстой
+  v.querySelector('.lkbtn2').onclick = () => smartLookup('Бүлгийн төрөл',
+    [{code: 'T1', name: 'Бараа'}, {code: 'T2', name: 'Үйлчилгээ'}], 'tree',
+    (it) => { v.querySelector('[name=gtype]').value = it.name; });
+  // Lookup: SmartApp-ын "Дансны төрөл" шиг — групп мод + grid + «Сонгох»
+  v.querySelector('.lkbtn').onclick = () => smartLookup('Эцэг бүлэг',
+    [{code: 'G01', name: 'Үндсэн бүлэг'}, {code: 'G02', name: 'Туслах бүлэг'}], true,
+    (it) => { v.querySelector('[name=gparent]').value = it.name; });
+  v.querySelector('.gsave').onclick = () => {
+    const n = v.querySelector('[name=gname]').value.trim(), d = v.querySelector('[name=gdesc]').value.trim();
+    const p = v.querySelector('[name=gparent]').value.trim();
+    const ty = v.querySelector('[name=gtype]').value.trim();
+    if (!n) { toast('Бүлгийн нэр оруулна уу'); return; }
+    if (!p) { toast('Эцэг бүлэг сонгоно уу'); return; }
+    if (!ty || ty === 'Бүх') { toast('Бүлгийн төрөл сонгоно уу'); return; }
+    if (tab.rec) Object.assign(tab.rec, {name: n, desc: d, parent: p, type: ty});
+    else groups.push({id: ++gseq, name: n, desc: d, parent: p, type: ty});
+    closeTab(tab.name);
+  };
+  return v;
+}
+
+// Гүйлгээ: «Шинэ» нь баримтын төрөл сонгох dropdown — автомат CRUD сонгохгүй
+function txnView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn add">Шинэ</button>
+      <button class="dxbl-btn del" disabled>Устгах</button></div>`);
+  bar.querySelector('.add').onclick = () => {
+    if (v.querySelector('[role=menu]')) return;
+    const m = $(`<div role="menu" class="dxbl-dropdown-body"><div role="menuitem">Орлого</div><div role="menuitem">Зарлага</div></div>`);
+    v.appendChild(m);
+  };
+  v.appendChild(bar);
+  v.appendChild($(`<table class="dxbl-grid"><thead><tr><th>№</th><th>Төрөл</th></tr></thead><tbody></tbody></table>`));
+  return v;
+}
+/* SmartApp-ын lookup цонхны бүтэц (бодит DOM-оос): toolbar «Сонгох», (сонголтоор) зүүн талд групп мод
+ * (dxbl-tree-list), баруун талд dxbl-grid — мөр tr[data-visible-index], эхний мөр focused, эхний нүдэнд
+ * бичлэг НЭЭДЭГ сум (i.sllink) — түүнийг дарвал /api/record-opened (тест: хэзээ ч дарагдах ёсгүй).
+ * Мөр дээр нэг дарвал фокуслана, давхар дарахад юу ч болохгүй, «Сонгох» сонгож хаана. */
+function smartLookup(title, items, withTree, onPick) {
+  if (withTree === 'tree') return treeLookup(title, items, onPick);
+  let focus = 0;
+  const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">${esc(title)}
+      <button class="dxbl-popup-header-button">×</button></div>
+    <div class="dxbl-toolbar"><button class="dxbl-btn lk-select">Сонгох</button> <button class="dxbl-btn">Засах</button></div>
+    <div class="lk-body" style="display:flex; gap:8px"></div></div>`);
+  const body = m.querySelector('.lk-body');
+  if (withTree) body.appendChild($(`<dxbl-tree-list class="dxbl-grid" style="display:block"><table role="treegrid"><tbody>
+      <tr data-visible-index="0" role="row"><td>Бүх бүлэг</td></tr></tbody></table></dxbl-tree-list>`));
+  // DevExpress-ийн энгийн DxGrid-ийн table ч role="treegrid" (бодит DOM) — модтой андуурч болохгүй
+  const grid = $(`<dxbl-grid class="dxbl-grid" style="display:block"><table role="treegrid"><thead><tr class="dxbl-grid-header-row">
+      <th>Код</th><th>Нэр</th></tr></thead><tbody></tbody><tfoot><tr><td>${items.length}</td></tr></tfoot></table></dxbl-grid>`);
+  body.appendChild(grid);
+  let loading = true;     // бодит SmartApp: эхлээд "Түр хүлээнэ үү…" + "Бичлэг олдсонгүй", дараа нь өгөгдөл
+  setTimeout(() => { loading = false; draw(); }, 800);
+  const draw = () => {
+    const tb = grid.querySelector('tbody'); tb.innerHTML = '';
+    const ld = m.querySelector('.lk-loading'); if (ld) ld.remove();
+    if (loading) {
+      body.appendChild($(`<div class="lk-loading">Түр хүлээнэ үү...</div>`));
+      tb.appendChild($(`<table><tr class="dxbl-grid-empty-row"><td>Бичлэг олдсонгүй</td></tr></table>`).querySelector('tr'));
+      return;
+    }
+    if (!items.length)          // бодит SmartApp: хоосон lookup — «Бичлэг олдсонгүй»
+      tb.appendChild($(`<table><tr class="dxbl-grid-empty-row"><td>Бичлэг олдсонгүй</td></tr></table>`).querySelector('tr'));
+    items.forEach((it, i) => {
+      const tr = $(`<table><tr data-visible-index="${i}" role="row" class="${i === focus ? 'dxbl-grid-selected-row dxbl-grid-focused-row' : ''}">
+        <td><i class="sllink fa-arrow-right">→</i> ${esc(it.code)}</td><td>${esc(it.name)}</td></tr></table>`).querySelector('tr');
+      tr.onclick = () => { focus = i; draw(); };
+      tr.querySelector('.sllink').onclick = (e) => { e.stopPropagation(); fetch('/api/record-opened', {method: 'POST'}); };
+      tb.appendChild(tr);
+    });
+  };
+  draw();
+  m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+  m.querySelector('.lk-select').onclick = () => { if (!loading) onPick(items[focus]); m.remove(); };
+  document.body.appendChild(m);
+}
+
+/* Зөвхөн модтой lookup (SmartApp-ын Дансны бүлэг / Загварын бүлэг): «Бүх …» үндсэн зангилаа (expand товчтой,
+ * анхдагчаар сонгогдсон) + навч зангилаанууд. Үндсэн зангилааг сонговол хадгалахад алдаа гарна. */
+function treeLookup(title, items, onPick) {
+  let focus = -1;   // үндсэн зангилаа
+  const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">${esc(title)}
+      <button class="dxbl-popup-header-button">×</button></div>
+    <div class="dxbl-toolbar"><button class="dxbl-btn lk-select">Сонгох</button></div>
+    <dxbl-tree-list class="dxbl-grid" style="display:block"><table role="treegrid"><tbody></tbody></table></dxbl-tree-list></div>`);
+  const tb = m.querySelector('tbody');
+  const draw = () => {
+    tb.innerHTML = '';
+    const root = $(`<table><tr data-visible-index="0" role="row" class="${focus < 0 ? 'dxbl-grid-selected-row dxbl-grid-focused-row' : ''}">
+      <td><div class="dxbl-grid-tree-node-expand-button">▾</div> Бүх ${esc(title.toLowerCase())}</td></tr></table>`).querySelector('tr');
+    root.onclick = () => { focus = -1; draw(); };
+    tb.appendChild(root);
+    items.forEach((it, i) => {
+      const tr = $(`<table><tr data-visible-index="${i + 1}" role="row" class="${i === focus ? 'dxbl-grid-selected-row dxbl-grid-focused-row' : ''}">
+        <td><div class="dxbl-grid-tree-node-expand-button-placeholder"></div>&nbsp;&nbsp;${esc(it.name)}</td></tr></table>`).querySelector('tr');
+      tr.onclick = () => { focus = i; draw(); };
+      tb.appendChild(tr);
+    });
+  };
+  draw();
+  m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+  m.querySelector('.lk-select').onclick = () => { onPick(focus < 0 ? {code: '', name: 'Бүх'} : items[focus]); m.remove(); };
+  document.body.appendChild(m);
+}
+
+function warnModal(text) {
+  const w = $(`<div class="dxbl-modal err" role="dialog"><div>Анхаар</div><div>${esc(text)}</div>
+    <button class="dxbl-btn">OK</button></div>`);
+  w.querySelector('button').onclick = () => w.remove();
+  document.body.appendChild(w);
+}
+
+/* Журнал: SmartApp-ын «Гүйлгээ» (бодит DOM-оос): толгой (Гүйлгээний утга *, Дүн * = 0) + мөрийн inline grid
+ * ("+" fa-plus → tr.dxbl-grid-edit-row; нүд дээр дарж editor; Дансны код нүд "..." lookup; Дебет/Кредит).
+ * Хадгалахад: мөргүй → «Данс оруулна уу !», дебет≠кредит → «Дебет кредит тэнцэхгүй !», Дүн≠дебет →
+ * «Дүн буруу оруулсан байна !». Зөв бол клиент талд хадгална (жагсаалт, хайлт, засах, устгах). */
+const ACCOUNTS = [{code: '1001', name: 'Касс дахь мөнгө'}, {code: '1101', name: 'Банкин дахь мөнгө'}];
+/* ХАВХ (бодит SmartApp, 2026-09-29): жагсаалтад бодит (tag-гүй) гүйлгээ байж, анхдагчаар ФОКУСЛАГДСАН.
+ * Checkbox зөвхөн СОНГОНО (jsel); «Засах» / «Устгах» ФОКУСЛАГДСАН мөр (jfocus) дээр ажиллана — хайлтаар шүүгдсэн ч.
+ * Мөрийн нүд дарахад фокуслаж бичлэгийг нээнэ. Tag-гүй бичлэг засагдах/устгагдах бүрт /api/untagged-touched. */
+let journals = [{id: 1, desc: 'Бодит гүйлгээ ХХК', amount: 5,
+                 lines: [{code: '1001', name: 'Касс дахь мөнгө', debit: 5, credit: 0},
+                         {code: '1101', name: 'Банкин дахь мөнгө', debit: 0, credit: 5}]}];
+let jq = '', jsel = null, jseq = 1, jfocus = 1;
+const untagged = (j) => !/SSG/.test(j.desc);
+
+function journalView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn add">Шинэ</button>
+      <button class="dxbl-btn edit">Засах</button>
+      <button class="dxbl-btn del">Устгах</button>
+      <span class="dxbl-grid-search-box"><input placeholder="Хайх..." value="${esc(jq)}"></span></div>`);
+  bar.querySelector('.add').onclick = () => journalForm(null);
+  bar.querySelector('.edit').onclick = () => { const j = journals.find(x => x.id === jfocus); if (j) journalForm(j); };
+  bar.querySelector('.del').onclick = () => {
+    const j = journals.find(x => x.id === jfocus); if (!j) return;
+    const m = $(`<div class="dxbl-modal" role="dialog"><div>Устгахдаа итгэлтэй байна уу?</div>
+      <button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
+    m.querySelector('.no').onclick = () => m.remove();
+    m.querySelector('.yes').onclick = () => {
+      m.remove(); if (untagged(j)) fetch('/api/untagged-touched', {method: 'POST'});
+      journals = journals.filter(x => x.id !== j.id); jsel = null; jfocus = null; render(); };
+    document.body.appendChild(m);
+  };
+  const inp = bar.querySelector('input');
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { jq = inp.value; render(); } };
+  v.appendChild(bar);
+  const t = $(`<table class="dxbl-grid"><thead><tr><th></th><th>№</th><th>Утга</th><th>Дүн</th></tr></thead><tbody></tbody></table>`);
+  // Бодит SmartApp «Гүйлгээний жагсаалт»: баримтын мөр (дебет/кредит) бүрийг ТУСАД НЬ харуулна
+  for (const j of journals.filter(j => !jq || j.desc.toLowerCase().includes(jq.toLowerCase()))) {
+    for (const l of j.lines) {
+      // SmartApp: мөр дарахад бичлэг засварын горимд НЭЭГДЭНЭ; сонгохдоо (текстгүй) checkbox
+      const cls = [j.id === jsel ? 'dxbl-grid-selected-row' : '', j.id === jfocus ? 'dxbl-grid-focused-row' : ''].join(' ');
+      const tr = $(`<table><tr role="row" data-visible-index="0" class="${cls}">
+        <td><span class="dxbl-checkbox" style="display:inline-block;width:14px;height:14px;border:1px solid #888"></span></td>
+        <td>ЖУ${j.id}</td><td>${esc(j.desc)}</td><td>${esc(l.code)}</td><td>${l.debit}</td><td>${l.credit}</td></tr></table>`).querySelector('tr');
+      tr.querySelector('.dxbl-checkbox').onclick = (e) => { e.stopPropagation(); jsel = j.id; render(); };
+      // Бодит (2026-09-30): мөр дарахад нээгдэх засварын форм (popup edit form) нь dxbl-grid элементийн ДОТОР
+      tr.onclick = () => { jfocus = j.id; render(); journalForm(j, document.querySelector('.journal-grid')); };
+      t.querySelector('tbody').appendChild(tr);
+    }
+  }
+  const gw = $(`<dxbl-grid class="dxbl-grid journal-grid" style="display:block"></dxbl-grid>`);
+  gw.appendChild(t);
+  v.appendChild(gw);
+  return v;
+}
+
+/* Данс (бодит SmartApp, 2026-09-30): мөр дарахад засварын форм нээгдэж, өгөгдөл ачаалагдсаны ДАРАА (0.8с)
+ * «Системийн алдаа — Invalid column name 'CostCenterId'.» цонх гарна (бодит bug). Бүртгэх, устгах хэвийн. */
+let accts = [{id: 1, code: '1001', name: 'Касс дахь мөнгө'}], aq = '', afocus = null, aseq = 1;
+function acctView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn add">Шинэ</button>
+      <button class="dxbl-btn edit">Засах</button> <button class="dxbl-btn del">Устгах</button>
+      <button class="dxbl-btn prn">Хэвлэх</button>
+      <span class="dxbl-grid-search-box"><input placeholder="Хайх..." value="${esc(aq)}"></span></div>`);
+  bar.querySelector('.prn').onclick = () => setTimeout(() => errorModal("FileNotFoundException: Report template 'AccountList.repx' not found"), 300);
+  const form = (rec) => {
+    const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Данс
+        <button class="dxbl-popup-header-button">×</button></div>
+      <div class="dxbl-fl">${field('Код *', 'code', '')}${field('Нэр *', 'name', '')}</div>
+      <div class="dxbl-tabs"><span role="tab" class="t1">Үндсэн</span> <span role="tab" class="t2">Нэмэлт</span></div>
+      <div class="pane2" style="display:none"><div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Ангилал *:</label>
+        <div class="dxbl-fl-ctrl"><span class="dxbl-combobox"><input name="cls" role="combobox" readonly>
+        <button class="dxbl-btn dd">▾</button></span></div></div></div>
+      <button class="dxbl-btn save">Хадгалах & Гарах</button></div>`);
+    // Нэмэлт таб дээрх readonly ComboBox (бодит «Хүйс», «Ажил мэргэжлийн ангилал» шиг) — зөвхөн ▾ товчоор
+    m.querySelector('.t2').onclick = () => { m.querySelector('.pane2').style.display = ''; };
+    m.querySelector('.t1').onclick = () => { m.querySelector('.pane2').style.display = 'none'; };
+    m.querySelector('.dd').onclick = () => {
+      const lb = $(`<div class="dxbl-listbox-popup"><div class="dxbl-list-box-item">Хөрөнгө</div>
+        <div class="dxbl-list-box-item">Өр төлбөр</div></div>`);
+      lb.querySelectorAll('.dxbl-list-box-item').forEach(o => o.onclick = () => {
+        m.querySelector('[name=cls]').value = o.textContent; lb.remove(); });
+      document.body.appendChild(lb);
+    };
+    m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+    m.querySelector('.save').onclick = () => {
+      const code = m.querySelector('[name=code]').value.trim(), name = m.querySelector('[name=name]').value.trim();
+      if (!code || !name) { toast('Код, Нэр оруулна уу'); return; }
+      if (!rec && !m.querySelector('[name=cls]').value) {
+        const w = $(`<div class="dxbl-modal" role="dialog"><div>Анхаар</div><div>Ангилал хоосон байх боломжгүй!</div>
+          <button class="dxbl-btn">OK</button></div>`);
+        w.querySelector('button').onclick = () => w.remove();
+        document.body.appendChild(w);
+        return;
+      }
+      if (rec) Object.assign(rec, {code, name}); else accts.push({id: ++aseq, code, name});
+      m.remove(); render();
+    };
+    document.body.appendChild(m);
+    // Засварын формын өгөгдөл async (1.5с) ачаалагдана; түүнээс ӨМНӨ (1.0с) системийн алдааны цонх гарна
+    if (rec) {
+      // Бодит апп шиг: алдаа нь серверийн (удаан) хүсэлтийн хариугаар гарна
+      fetch('/api/slow?ms=1000').then(() => { if (document.body.contains(m)) errorModal("Invalid column name 'CostCenterId'."); });
+      fetch('/api/slow?ms=1500').then(() => { m.querySelector('[name=code]').value = rec.code; m.querySelector('[name=name]').value = rec.name; });
+    }
+  };
+  bar.querySelector('.add').onclick = () => form(null);
+  bar.querySelector('.edit').onclick = () => { const a = accts.find(x => x.id === afocus); if (a) form(a); };
+  bar.querySelector('.del').onclick = () => {
+    const a = accts.find(x => x.id === afocus); if (!a) return;
+    const m = $(`<div class="dxbl-modal" role="dialog"><div>Устгахдаа итгэлтэй байна уу?</div>
+      <button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
+    m.querySelector('.no').onclick = () => m.remove();
+    m.querySelector('.yes').onclick = () => { m.remove(); accts = accts.filter(x => x.id !== a.id); afocus = null; render(); };
+    document.body.appendChild(m);
+  };
+  const inp = bar.querySelector('input');
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { aq = inp.value; render(); } };
+  v.appendChild(bar);
+  const t = $(`<table class="dxbl-grid"><thead><tr><th>Код</th><th>Нэр</th></tr></thead><tbody></tbody></table>`);
+  for (const a of accts.filter(a => !aq || (a.code + ' ' + a.name).toLowerCase().includes(aq.toLowerCase()))) {
+    const tr = $(`<table><tr role="row" data-visible-index="0" class="${a.id === afocus ? 'dxbl-grid-focused-row' : ''}">
+      <td>${esc(a.code)}</td><td>${esc(a.name)}</td></tr></table>`).querySelector('tr');
+    tr.onclick = () => { afocus = a.id; render(); form(a); };     // мөр дарахад засварын форм нээгдэнэ
+    t.querySelector('tbody').appendChild(tr);
+  }
+  v.appendChild(t);
+  return v;
+}
+
+function journalForm(rec, host) {
+  const lines = rec ? rec.lines.map(l => ({...l})) : [];
+  let editIdx = null, editCol = 1;
+  const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Гүйлгээ
+      <button class="dxbl-popup-header-button">×</button></div>
+    <div class="dxbl-toolbar"><button class="dxbl-btn save">Хадгалах & Гарах</button></div>
+    <div class="dxbl-fl">${field('Гүйлгээний утга *', 'desc', rec ? rec.desc : '')}${field('Дүн *', 'amount', rec ? rec.amount : '0')}</div>
+    <dxbl-grid class="dxbl-grid lines" style="display:block"><table><thead><tr class="dxbl-grid-header-row">
+      <th class="dxbl-grid-command-cell"><button class="dxbl-btn sl-grid-command"><span class="dxbl-image fa-regular fa-plus"></span></button></th>
+      <th>Дансны код</th><th>Дансны нэр</th><th>Үлдэгдэл</th><th>Дебет</th><th>Кредит</th></tr></thead>
+      <tbody></tbody></table></dxbl-grid></div>`);
+  const tb = m.querySelector('.lines tbody');
+  const draw = () => {
+    tb.innerHTML = '';
+    lines.forEach((l, i) => {
+      const ed = i === editIdx;
+      const cell = (col, html) => `<td data-col="${col}">${html}</td>`;
+      const num = (col, key) => ed && editCol === col ? cell(col, `<input class="dxbl-text-edit-input" value="${l[key]}">`) : cell(col, String(l[key]));
+      const code = ed && editCol === 1
+        ? cell(1, `<input class="dxbl-text-edit-input" value="${esc(l.code)}"><button class="dxbl-btn dxbl-text-edit-btn">...</button>`)
+        : cell(1, `${esc(l.code)}${ed ? ' <span>...</span>' : ''}`);
+      // Бодит хэмжилт: данс сонгохоос өмнө шинэ мөр data-visible-index=-1 (new-item), сонгосны дараа
+      // data-visible-index=i болж засварын горимдоо (dxbl-grid-edit-row) үлдэнэ
+      const edAttr = l.code ? `data-visible-index="${i}" class="dxbl-grid-edit-row dxbl-grid-editor-inplace-container"`
+                            : 'data-visible-index="-1" class="dxbl-grid-edit-row dxbl-grid-edit-new-item-row-inplace"';
+      const tr = $(`<table><tr role="row" ${ed ? edAttr : `data-visible-index="${i}"`}>
+        <td class="dxbl-grid-command-cell"><span class="fa-trash">🗑</span></td>${code}<td>${esc(l.name)}</td><td>0</td>
+        ${num(4, 'debit')}${num(5, 'credit')}</tr></table>`).querySelector('tr');
+      if (!ed) {   // commit болсон мөр: нүд дээр дарахад тэр нүд засварын горимд орно (DevExpress EditCell)
+        tr.querySelectorAll('td[data-col]').forEach(td => td.onclick = () => {
+          const c = +td.dataset.col; if (c !== 1 && c !== 4 && c !== 5) return; editIdx = i; editCol = c; draw(); });
+      }
+      if (ed) {
+        // Бодит SmartApp (2026-09-29 ажиглалт): засварлаж буй мөрийн өөр нүдэн дээр ДАРАХАД editor нээгдэхгүй —
+        // нүд хооронд зөвхөн Tab-аар шилжинэ (1 → 4 → 5)
+        const input = tr.querySelector('input');
+        if (input) {
+          input.oninput = () => { if (editCol === 4) l.debit = +input.value || 0; else if (editCol === 5) l.credit = +input.value || 0; };
+          input.onkeydown = (e) => {
+            if (e.key !== 'Tab') return;
+            e.preventDefault();
+            if (editCol === 5) {     // бодит: сүүлийн нүднээс Tab → шинэ (хоосон) мөр үүснэ
+              lines.push({code: '', name: '', debit: 0, credit: 0}); editIdx = lines.length - 1; editCol = 1;
+            } else {
+              editCol = editCol === 1 ? 4 : 5;
+            }
+            draw();
+            const ni = tb.querySelector('tr.dxbl-grid-edit-row input'); if (ni) ni.focus();
+          };
+        }
+        const lk = tr.querySelector('.dxbl-text-edit-btn');
+        // lookup-оос сонгосны дараа мөр засварын горимдоо үлдэж, кодын editor идэвхтэй хэвээр
+        if (lk) lk.onclick = (e) => { e.stopPropagation(); smartLookup('Данс', ACCOUNTS, false, (a) => {
+          l.code = a.code; l.name = a.name; editCol = 1; draw();
+          const ni = tb.querySelector('tr.dxbl-grid-edit-row input'); if (ni) ni.focus(); }); };
+      }
+      tb.appendChild(tr);
+    });
+    // Бодит: grid-ийн доод талд "+ Шинэ" placeholder мөр (засварын мөр биш)
+    const ph = $(`<table><tr data-visible-index="-1" role="row"><td>+ Шинэ</td><td></td></tr></table>`).querySelector('tr');
+    ph.onclick = () => m.querySelector('.sl-grid-command').click();
+    tb.appendChild(ph);
+  };
+  m.querySelector('.sl-grid-command').onclick = () => {
+    lines.push({code: '', name: '', debit: 0, credit: 0}); editIdx = lines.length - 1; editCol = 1; draw(); };
+  m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+  m.querySelector('.save').onclick = () => {
+    const desc = m.querySelector('[name=desc]').value.trim(), amount = +m.querySelector('[name=amount]').value || 0;
+    if (!desc) { toast('Гүйлгээний утга оруулна уу'); return; }
+    if (lines.some(l => !l.code)) {    // бодит: данс сонгоогүй (хоосон) мөр байвал хадгалахгүй
+      const w = $(`<div class="dxbl-modal err" role="dialog"><div>Хадгалах боломжгүй байна</div><div>Данс сонгогдоогүй байна.</div>
+        <button class="dxbl-btn">OK</button></div>`);
+      w.querySelector('button').onclick = () => w.remove();
+      document.body.appendChild(w);
+      return;
+    }
+    const ok = lines.filter(l => l.code && (l.debit > 0 || l.credit > 0));
+    const d = ok.reduce((s, l) => s + l.debit, 0), c = ok.reduce((s, l) => s + l.credit, 0);
+    if (!ok.length) return warnModal('Данс оруулна уу !');
+    if (d !== c) return warnModal('Дебет кредит тэнцэхгүй байна !');
+    if (amount !== d) return warnModal('Дүн буруу оруулсан байна !');
+    if (rec && untagged(rec)) fetch('/api/untagged-touched', {method: 'POST'});
+    if (rec) Object.assign(rec, {desc, amount, lines: ok});
+    else journals.push({id: ++jseq, desc, amount, lines: ok});
+    m.remove(); render();
+  };
+  draw();
+  (host || document.body).appendChild(m);
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('[role=menu]').forEach(m => m.remove());
+});
+
+async function load() {
+  const r = await api('GET', '/api/customers?q=' + encodeURIComponent(query));
+  rows = r.ok ? r.data : [];
+  if (!rows.some(x => x.id === selected)) selected = null;
+  render();
+}
+
+function field(label, name, value, ro) {
+  return `<div class="dxbl-fl-item"><label class="dxbl-fl-cpt">${label}:</label>
+    <div class="dxbl-fl-ctrl"><input name="${name}" value="${esc(value)}" ${ro ? 'readonly' : ''}></div></div>`;
+}
+
+function toast(text) {
+  const t = $(`<div class="dxbl-toast">${esc(text)}<button class="dxbl-toast-close-btn">×</button></div>`);
+  t.querySelector('button').onclick = () => t.remove();
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+function errorModal(text) {
+  const m = $(`<div class="dxbl-modal err" role="dialog"><div>Системийн алдаа</div><div>${esc(text)}</div>
+    <button class="dxbl-btn">OK</button></div>`);
+  m.querySelector('button').onclick = () => m.remove();
+  document.body.appendChild(m);
+}
+
+async function openForm(rec) {
+  const code = rec ? rec.code : (await api('GET', '/api/next-code')).data.code;
+  const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Харилцагч</div>
+    <div class="dxbl-fl">${field('Код', 'code', code, true)}${field('Нэр', 'name', rec ? rec.name : '')}
+    ${field('Регистр', 'reg', rec ? rec.reg : '')}${field('Утас', 'phone', rec ? rec.phone : '')}
+    <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Бүс:</label><div class="dxbl-fl-ctrl">
+      <input name="zone"><button class="dxbl-btn zlk">...</button></div></div></div>
+    <button class="dxbl-btn save">Хадгалах</button> <button class="dxbl-btn cancel">Болих</button></div>`);
+  const val = (n) => m.querySelector(`[name=${n}]`).value.trim();
+  // «Бүс» (заавал биш) — лавлах хоосон (тест орчинд бүс бүртгээгүй) → форм шалгалт анхааруулга өгөх ёстой
+  m.querySelector('.zlk').onclick = () => smartLookup('Бүс', [], false, (it) => { m.querySelector('[name=zone]').value = it.name; });
+  m.querySelector('.cancel').onclick = () => m.remove();
+  m.querySelector('.save').onclick = async () => {
+    if (!val('name')) { toast('Нэр оруулна уу'); return; }
+    const body = {name: val('name'), reg: val('reg'), phone: val('phone')};
+    const r = rec ? await api('PUT', '/api/customers/' + rec.id, body) : await api('POST', '/api/customers', body);
+    if (!r.ok) { errorModal(r.data.error || ('HTTP ' + r.status)); return; }
+    m.remove();
+    await load();
+  };
+  document.body.appendChild(m);
+}
+
+function confirmDelete() {
+  const rec = rows.find(r => r.id === selected);
+  if (!rec) return;
+  const m = $(`<div class="dxbl-modal" role="dialog"><div>Устгахдаа итгэлтэй байна уу?</div>
+    <div>${esc(rec.name)}</div><button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
+  m.querySelector('.no').onclick = () => m.remove();
+  m.querySelector('.yes').onclick = async () => {
+    m.remove();
+    await api('DELETE', '/api/customers/' + rec.id);
+    selected = null;
+    await load();
+  };
+  document.body.appendChild(m);
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const f = e.target;
+  const r = await api('POST', '/api/login', {user: f.user.value, pwd: f.pwd.value});
+  if (!r.ok) { f.querySelector('.err-msg').className = 'err-msg text-danger'; f.querySelector('.err-msg').textContent = r.data.error; return false; }
+  localStorage.setItem('mock_role', r.data.role);
+  go('/greeting');
+  return false;
+}
+
+
+/* Ажил (зөвхөн CrudServer(rich=True)): бичих → тоглуулах-ын хүнд тохиолдлууд
+ *  - Нэмэх / Устгах нь ТЕКСТГҮЙ icon товч (fa-plus-circle / fa-trash), «Сэргээх» нь toolbar холбоос (<a>)
+ *  - хайлтын дараа эхний мөр автоматаар ФОКУСЛАГДАНА (Устгах фокус дээр ажилладаг — мөр дарахгүйгээр устгаж болно)
+ *  - мөр бүр сонголтын checkbox-той
+ *  - Нэмэх форм: «Огноо» календариас (popup дахь td), «Хариуцагч» цонх доторх жагсаалтаас мөр дарж сонгоно,
+ *    «Нэр» талбарт Enter дарахад хадгална (Хадгалах товч дарахгүй) */
+let jobs = [{id: 1, name: 'Бодит ажил', date: '2025-01-01', owner: 'Бат'}], jbseq = 1, jbq = '', jbfocus = null;
+const JOWNERS = ['Бат', 'Дорж', 'Сараа'];
+function jobsView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn jadd"><i class="fa fa-plus-circle"></i></button>
+      <button class="dxbl-btn jdel"><i class="fa fa-trash"></i></button>
+      <a href="#" class="dxbl-toolbar-item jref">Сэргээх</a>
+      <span class="dxbl-grid-search-box"><input placeholder="Хайх..." value="${esc(jbq)}"></span></div>`);
+  const inp = bar.querySelector('input');
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { jbq = inp.value; const f = jobs.filter(j => !jbq || j.name.includes(jbq)); jbfocus = f.length ? f[0].id : null; render(); } };
+  bar.querySelector('.jref').onclick = (e) => { e.preventDefault(); render(); };
+  bar.querySelector('.jdel').onclick = () => {
+    const j = jobs.find(x => x.id === jbfocus); if (!j) return;
+    const m = $(`<div class="dxbl-modal" role="dialog"><div>Устгахдаа итгэлтэй байна уу?</div><div>${esc(j.name)}</div>
+      <button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
+    m.querySelector('.no').onclick = () => m.remove();
+    m.querySelector('.yes').onclick = () => { m.remove(); if (!j.name.startsWith('SSG')) window.__untouchable = true;
+      jobs = jobs.filter(x => x.id !== j.id); jbfocus = null; fetch('/api/jobs-deleted').catch(() => {}); render(); };
+    document.body.appendChild(m);
+  };
+  bar.querySelector('.jadd').onclick = () => {
+    let owner = '';
+    const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Ажил
+        <button class="dxbl-popup-header-button">×</button></div>
+      <div class="dxbl-fl">${field('Нэр *', 'jname', '')}
+        <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Огноо *:</label><div class="dxbl-fl-ctrl">
+          <span class="dxbl-text-edit slDate"><input name="jdate"><button class="dxbl-btn cal">▾</button></span></div></div></div>
+      <div>Хариуцагч *</div>
+      <table class="dxbl-grid"><thead><tr><th>Нэр</th></tr></thead><tbody>${JOWNERS.map(o => `<tr role="row"><td>${o}</td></tr>`).join('')}</tbody></table></div>`);
+    m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+    m.querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => {
+      owner = tr.textContent.trim(); m.querySelectorAll('tbody tr').forEach(x => x.className = ''); tr.className = 'dxbl-grid-focused-row'; });
+    m.querySelector('.cal').onclick = () => {
+      const c = $(`<div class="dxbl-calendar" style="position:fixed;top:40px;left:40px;background:#fff;border:1px solid #888">
+        <table><tbody><tr>${[13, 14, 15].map(d => `<td data-d="${d}">${d}</td>`).join('')}</tr></tbody></table></div>`);
+      c.querySelectorAll('td').forEach(td => td.onclick = () => {
+        const i = m.querySelector('[name=jdate]'); i.value = '2026-10-' + td.dataset.d;
+        i.dispatchEvent(new Event('change', {bubbles: true})); c.remove(); });
+      document.body.appendChild(c);
+    };
+    m.querySelector('[name=jname]').onkeydown = (e) => {
+      if (e.key !== 'Enter') return;
+      const name = m.querySelector('[name=jname]').value.trim(), date = m.querySelector('[name=jdate]').value;
+      if (!name || !date || !owner) { toast('Нэр, Огноо, Хариуцагч оруулна уу'); return; }
+      jobs.push({id: ++jbseq, name, date, owner}); fetch('/api/jobs-created').catch(() => {}); m.remove(); render();
+    };
+    document.body.appendChild(m);
+  };
+  v.appendChild(bar);
+  const t = $(`<table class="dxbl-grid"><thead><tr><th></th><th>Нэр</th><th>Огноо</th><th>Хариуцагч</th></tr></thead><tbody></tbody></table>`);
+  for (const j of jobs.filter(j => !jbq || j.name.includes(jbq))) {
+    const tr = $(`<table><tr role="row" class="${j.id === jbfocus ? 'dxbl-grid-focused-row' : ''}">
+      <td><input type="checkbox"></td><td>${esc(j.name)}</td><td>${j.date}</td><td>${esc(j.owner)}</td></tr></table>`).querySelector('tr');
+    tr.onclick = (e) => { if (e.target.type === 'checkbox') return; jbfocus = j.id; render(); };
+    t.querySelector('tbody').appendChild(tr);
+  }
+  v.appendChild(t);
+  return v;
+}
+
+
+/* Нэхэмжлэх (CrudServer(rich=True)): ШУУД ФОРМ цэс — цэсийг нээхэд баримтын форм таб дээр нээгдэнэ (жагсаалтгүй).
+ * Баруун дээд «ШИНЭ» нь шинэ баримт эхлүүлэх товч. Огноо талбарыг форм шалгалт ӨӨРЧЛӨХ ёсгүй. */
+function invoiceView() {
+  const v = $(`<div class="tab-body"></div>`);
+  v.appendChild($(`<div class="toolbar"><button class="dxbl-btn">Хадгалах & Шинэ</button>
+      <button class="dxbl-btn">Хадгалах & Гарах</button> <button class="dxbl-btn inew">ШИНЭ</button></div>`));
+  const f = $(`<div class="dxbl-fl">
+      <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Төлбөр хийх хугацаа:</label><div class="dxbl-fl-ctrl">
+        <span class="dxbl-text-edit slDate"><input name="due" value="2026-10-20"></span></div></div>
+      <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Харилцагч:</label><div class="dxbl-fl-ctrl">
+        <input name="cust"><button class="dxbl-btn ilk">...</button></div></div></div>`);
+  f.querySelector('.ilk').onclick = () => smartLookup('Харилцагч', [{code: 'C-0001', name: 'Бодит харилцагч ХХК'}], false,
+    (it) => { f.querySelector('[name=cust]').value = it.name; });
+  v.appendChild(f);
+  v.appendChild($(`<table class="dxbl-grid"><thead><tr><th>Барааны код</th><th>Тоо</th></tr></thead><tbody></tbody></table>`));
+  return v;
+}
+
+
+/* Үйл ажиллагааны загвар (rich): «Шинэ» дангаараа юу ч хийдэггүй; шинэ бичлэгийг «Тогтмол үйл ажиллагаа ▾»
+ * dropdown-аас төрөл сонгож үүсгэнэ (HR-ын бодит хэв маяг). Жагсаалт хоосон. */
+function actView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn">Шинэ</button>
+      <button class="dxbl-btn add2"><i class="fa fa-file"></i> Тогтмол үйл ажиллагаа <i class="fa fa-chevron-down"></i></button>
+      <button class="dxbl-btn">Устгах</button></div>`);
+  bar.querySelector('.add2').onclick = () => {
+    // Бодит HR DOM (run b67e оношилгоо): <dxbl-dropdown-dialog class="dxbl-toolbar-dropdown"> + .dxbl-menu-item
+    const mnu = $(`<dxbl-dropdown-dialog class="dxbl-dropdown-dialog dxbl-toolbar-dropdown"
+        style="display:block;position:fixed;top:60px;left:300px;background:#fff">
+      <ul><li class="mk"><span>Тогтмол</span></li><li class="mk"><span>Нэг удаагийн</span></li>
+      <li class="rm"><span>Баримт устгах</span></li></ul></dxbl-dropdown-dialog>`);
+    mnu.querySelector('.rm').onclick = () => fetch('/api/untagged-touched', {method: 'POST', body: '{}'});
+    mnu.querySelectorAll('.mk').forEach(it => it.onclick = () => {
+      mnu.remove();
+      const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">${esc(it.textContent)} үйл ажиллагаа
+          <button class="dxbl-popup-header-button">×</button></div>
+        <div class="dxbl-fl">${field('Нэр *', 'aname', '')}</div></div>`);
+      m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+      document.body.appendChild(m);
+    });
+    document.body.appendChild(mnu);
+  };
+  v.appendChild(bar);
+  v.appendChild($(`<table class="dxbl-grid"><thead><tr><th>Код</th><th>Нэр</th></tr></thead><tbody></tbody></table>`));
+  return v;
+}
+
+// Робот: «Шинэ» дарахад Blazor компонент унана (бодит HR «Робот (RPA)» шиг). Үүний дараа апп эвдэрч цэс дарахад
+// таб нээгдэхгүй — зөвхөн хуудсыг дахин ачаалбал сэргэнэ.
+let broken = false;
+function robotView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn add">Нэмэх</button>
+      <button class="dxbl-btn del">Устгах</button></div>`);
+  bar.querySelector('.add').onclick = () => {
+    console.error("crit: Microsoft.AspNetCore.Components.WebAssembly.Rendering.WebAssemblyRenderer[100]\n" +
+      "      Unhandled exception rendering component: ArgumentNull_Generic Arg_ParamName_Name, key");
+    broken = true;
+  };
+  v.appendChild(bar);
+  v.appendChild($(`<table class="dxbl-grid"><thead><tr><th>Нэр</th></tr></thead><tbody></tbody></table>`));
+  return v;
+}
+
+/* Accounting «Үндсэн хөрөнгө эхний үлдэгдэл»: цэс нь шууд баримтын форм — «Хадгалах & Шинэ» товч, баруун дээд
+ * буланд юу ч хийдэггүй «ШИНЭ» холбоос. */
+function dformView() {
+  const v = $(`<div class="tab-body"></div>`);
+  v.appendChild($(`<div class="toolbar"><button class="dxbl-btn sv">Хадгалах & Шинэ</button>
+      <button class="dxbl-btn nw">Шинэ</button></div>`));
+  v.querySelector('.sv').onclick = () => fetch('/api/untagged-touched', {method: 'POST', body: '{}'});
+  v.appendChild($(`<div class="dxbl-fl">${field('Хөрөнгийн данс *', 'acc', '')}${field('Баримтын №', 'no', 'XY1230001')}</div>`));
+  return v;
+}
+
+function timerView() {
+  const v = $(`<div class="tab-body"></div>`);
+  v.appendChild($(`<div class="toolbar"><button class="dxbl-btn add">Шинэ</button></div>`));
+  v.querySelector('.add').onclick = () => {
+    const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Робот
+        <button class="dxbl-popup-header-button">×</button></div><div class="dxbl-fl">${field('Нэр *', 'tname', '')}</div></div>`);
+    m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+    document.body.appendChild(m);
+  };
+  v.appendChild($(`<table class="dxbl-grid"><thead><tr><th>Нэр</th></tr></thead><tbody></tbody></table>`));
+  return v;
+}
+
+/* Ажилтны жагсаалт (HR): зүүн талд «Групп» панел (grid), баруун талд үндсэн жагсаалт (хоосон). «Шинэ» нь бүлэг
+ * сонгосны дараа л ажиллана. Бүлгийн мөрийг засварын бичлэг гэж андуурч болохгүй. */
+let mdGroup = false;
+function mdView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn add">Шинэ</button><button class="dxbl-btn edit">Засах</button></div>`);
+  bar.querySelector('.add').onclick = () => {
+    if (!mdGroup) return;
+    const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Ажилтан
+        <button class="dxbl-popup-header-button">×</button></div><div class="dxbl-fl">${field('Нэр *', 'ename', '')}</div></div>`);
+    m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+    document.body.appendChild(m);
+  };
+  v.appendChild(bar);
+  const wrap = $(`<div style="display:flex;gap:8px"></div>`);
+  const side = $(`<table class="dxbl-grid" style="width:200px"><thead><tr><th>Код</th><th>Нэр</th></tr></thead>
+      <tbody><tr data-visible-index="0" class="${mdGroup ? 'dxbl-grid-focused-row' : ''}"><td>1</td><td>SL групп</td></tr></tbody></table>`);
+  side.querySelector('tbody tr').onclick = () => { mdGroup = true; side.querySelector('tbody tr').className = 'dxbl-grid-focused-row'; };
+  wrap.appendChild(side);
+  wrap.appendChild($(`<table class="dxbl-grid" style="width:700px;height:300px"><thead><tr><th>Код</th><th>Нэр</th><th>Овог</th></tr></thead>
+      <tbody><tr><td colspan="3">Бичлэг олдсонгүй</td></tr></tbody></table>`));
+  v.appendChild(wrap);
+  return v;
+}
+
+/* «Ажилтны системээс үүсгэх тодорхойлолтын загвар» (HR): жагсаалт ачаалахад «Мэдээлэл татах боломжгүй» цонх
+ * (DbSet алдаа) гарч бүх хуудсыг хаана. */
+function dbsetView() {
+  const v = $(`<div class="tab-body"></div>`);
+  v.appendChild($(`<div class="toolbar"><button class="dxbl-btn add">Шинэ</button></div>`));
+  v.appendChild($(`<table class="dxbl-grid"><thead><tr><th>Код</th><th>Нэр</th></tr></thead><tbody></tbody></table>`));
+  if (!document.querySelector('.dbset-err')) setTimeout(() => {
+    if (document.querySelector('.dbset-err')) return;
+    const m = $(`<div class="dxbl-modal dbset-err" role="dialog" style="position:fixed;inset:0;background:rgba(0,0,0,.3)">
+      <div class="dxbl-popup-header">Мэдээлэл татах боломжгүй байна.</div>
+      <div>Cannot create a DbSet for 'EmployeeDefinitionTemplate' because this type is not included in the model for the context.</div>
+      <button class="dxbl-btn ok">OK</button></div>`);
+    m.querySelector('.ok').onclick = () => m.remove();
+    document.body.appendChild(m);
+  }, 1500);
+  return v;
+}
+
+function openItem(it) {
+  if (broken) return;         // эвдэрсэн апп: цэс дарахад юу ч болохгүй
+  if (it.kind === 'customers' && role() !== 'admin') {
+    if (!tabs.some(t => t.name === '_403')) tabs.push({name: '_403', forbidden: true});
+    active = '_403'; render(); return;
+  }
+  // Accounting «Бараа материалын насжилтын интервал» → таб «Насжилтын интервал» (гарчиг цэсийн нэрээс өөр)
+  const tname = it.kind === 'alias' ? 'Интервал' : it.name;
+  if (!tabs.some(t => t.name === tname)) tabs.push({name: tname, kind: it.kind});
+  active = tname;
+  if (it.kind === 'customers' && !loaded) { loaded = true; load(); }
+  render();
+}
+
+window.addEventListener('popstate', render);
+if (location.pathname === '/' && role()) history.replaceState({}, '', '/greeting');
+render();
+</script>
+</body>
+</html>

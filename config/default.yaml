@@ -1,0 +1,201 @@
+# SSG Auto Tester — үндсэн тохиргоо.
+# Сайт бүрийн config/sites/<host>.yaml файл эдгээрийг (deep-merge) дарж бичнэ.
+
+timing:
+  slow_menu_ms: 5000         # цэс үүнээс удаан ачааллавал гүйцэтгэлийн анхааруулга (Fail биш)
+  wait_ms: 2000              # цэс дарсны дараах хүлээлт (таб нээгдээгүй үед баттай дүгнэх зай)
+  settle_ms: 600             # таб нээгдэж ачаалал дууссаны дараах хоцорсон toast/dialog барих ДЭЭД хязгаар (сүлжээ тайван болмогц эрт үргэлжилнэ)
+  post_close_wait_ms: 600    # таб хаасны дараах хоцорсон уналтын шалгалт
+  # "тайлан"/"төсөв" мэт сервер дээр аггрегац тооцоолол хийдэг цэс энгийн жагсаалтаас
+  # хавьгүй удаан (>15 сек) ачаалж болно — хэт богино байвал бодит амжилттай ачаалал
+  # дуусахаас өмнө хиймлээр Blocked болгож болзошгүй.
+  loading_blocked_ms: 30000  # "Loading…" үүнээс удаан бол Blocked
+  # ЧУХАЛ: item_timeout_s > app_ready_timeout_ms/1000 байх ёстой — цэс дарахад SPA бүтнээр
+  # reload хийвэл (503/сессийн алдаа г.м.) WASM апп app_ready_timeout_ms хүртэл ахин ачаалж
+  # болно; энэ хүлээлт _check_once дотор буюу item_timeout_s-ийн хүрээнд болдог тул богино
+  # байвал reload болсон цэс бүр гарцаагүй хиймэл "Timeout" авна.
+  item_timeout_s: 120        # нэг цэсийн дээд хугацаа
+  app_ready_timeout_ms: 60000  # WASM ачаалал (~35MB)
+  login_timeout_ms: 60000
+  manual_login_timeout_ms: 300000  # хэрэглэгч өөрөө гараар нэвтрэхийг хүлээх дээд хугацаа (эхний нэвтрэлт)
+  # Run-ы ДУНД session тасрахад дахин нэвтрэхийг хүлээх хугацаа. Урт run (HR: 200+ цэс) дунд хэрэглэгч
+  # компьютерээс холдсон байж болох тул эхний нэвтрэлтээс урт — хэтэрвэл үлдсэн цэсүүд «ажиллаагүй».
+  relogin_timeout_ms: 1800000
+  # Үүнээс удаан нээлттэй хүсэлтийг арын (long-poll/polling) холболт гэж үзэж «ачаалал»-д тооцохгүй
+  background_request_ms: 4000
+  # Жинхэнэ (deploy/түр) 503-ыг дахин оролдохын өмнөх хүлээлт. Cloudflare Speed Brain-ийн
+  # speculative prefetch 503 (`Sec-Purpose: prefetch`) нь илрүүлэгчид үл тоогдох тул энд
+  # хамаарахгүй — цэс бүрийн "эхний оролдлого 503" гэдэг тэр байсан.
+  deploy_retry_wait_ms: 3000
+  crash_settle_ms: 4000      # reload-ын дараа уналт давтагдах эсэхийг хүлээх
+
+browser:
+  headless: true
+  viewport: {width: 1366, height: 900}
+  locale: mn-MN
+  timezone: Asia/Ulaanbaatar
+
+session:
+  login_path: /auth/login
+  after_login_path: /greeting
+  min_session_minutes: 20     # TC-LOGIN-002
+
+selectors:
+  # Нэвтрэх хуудсыг таних (талбарыг хэзээ ч бөглөхгүй — хэрэглэгч гараар нэвтэрнэ)
+  password: "input[type=password]"
+  version_regex: "v\\d+\\.\\d+\\.\\d+(?:\\.\\d+)?"
+  app_ready: ".modulenavbar"
+  module_item: ".modulenavbar .nav-container"
+  menu_root: ".mainnavbar"
+  folder: "div[role=treeitem][aria-expanded]"
+  folder_collapsed: "div[role=treeitem][aria-expanded=false]"
+  leaf: "a[role=treeitem][href]"
+  parent_attr: "parent-id"
+  tab: "[role=tab]"
+  tab_active: "[role=tab].dxbl-active"
+  tab_close: ".dxbl-tabs-close-button"
+  # dxbl-modal-root: DevExpress DxPopup-ийн дэлгэц бүрхэх overlay (role=dialog-гүй алдааны цонх)
+  dialog: "[role=dialog], .dxbl-modal, dxbl-modal-root"
+  toast: ".dxbl-toast"
+  toast_close: ".dxbl-toast-close-btn, .dxbl-toast [aria-label=Close], .dxbl-toast button"
+  loading: ".dxbl-loading-panel, .loading-indicator"
+  loading_texts: ["Loading…", "Loading...", "Ачаалж байна"]
+  forbidden_tab_name: "_403"
+  forbidden_texts: ["Sorry, you are not authorized to access this page"]
+
+protected_tabs: ["Нүүр хуудас", "Мэдээлэл"]
+
+# READ-ONLY хамгаалалт: зөвхөн эдгээр тексттэй товчийг (цонх дотор) дарна.
+safe_dialog_buttons: ["OK", "Ok", "Хаах", "Close", "×", "Болих"]
+forbidden_button_words: ["Хадгалах", "Устгах", "Батлах", "Илгээх", "Нэмэх", "Засах", "Цуцлах",
+                         "Save", "Delete", "Approve", "Submit", "Send", "Remove", "Confirm"]
+
+detect:
+  runtime_crash: ["Unhandled Exception:", "MONO_WASM: Assert failed: .NET runtime already exited",
+                  ".NET runtime already exited", "BackgroundJobHandler failed"]
+  renderer_exception: ["Unhandled exception rendering component"]
+  auth_error: ["UserRefreshToken", "RefreshToken", "invalid_grant"]
+  sql_error: ["Invalid column name", "Invalid object name", "SqlException", "Cannot insert the value NULL",
+              "conversion failed", "Violation of", "Cannot create a DbSet", "is not included in the model"]
+  system_error_title: ["Системийн алдаа", "Cистемийн алдаа", "System error", "Алдаа", "Мэдээлэл татах боломжгүй"]
+  warning_toast: ["сонгоно уу", "оруулна уу"]
+  ignore_console: ["favicon.ico", "Download the React DevTools", "DevTools failed to load"]
+  # Яг ийм тексттэй консол алдааг үл тооно. «readonly» — апп өөрөө html2canvas-аар DevExpress элемент
+  # хуулахад DevExpress-ийн attributeChangedCallback шиддэг хор хөнөөлгүй алдаа (хэрэглэгчид харагдахгүй)
+  ignore_console_exact: ["readonly"]
+  # Цэсийг Fail болгохгүй «зөөлөн» илрэл — цэс Pass + анхааруулга, bug-ийн жагсаалтад 🟢 Minor
+  soft_findings: ["console_error", "warning_toast", "slow_load", "tab_name_mismatch"]
+  deploy_marker: "msdeploy"
+  forbidden_major_threshold: 5   # 403 үүнээс олон цэсэд давтагдвал 🟡 Major
+
+# Цэсийн TC-ийн давуу эрэмбэ (H багана)
+priority:
+  critical_items: ["Нүүр хуудас"]
+  default: major
+
+risky_items: ["динамик тайлан", "Робот (RPA)"]
+skip_items: []
+check_risky: true
+confirm_failures: true
+
+# Модулийн латин товчлол (TC-[MODULE]-[№])
+module_codes:
+  "Систем": SYS
+  "Мастер дата": MD
+  "Ерөнхий дэвтэр": GL
+  "Мөнгөн хөрөнгө": CASH
+  "Касс, харилцах": CASH
+  "Авлага, өглөг": ARAP
+  "Авлага өглөг": ARAP
+  "Худалдан авалт": PUR
+  "Борлуулалт": SAL
+  "Бараа материал": INV
+  "Нөөц": INV
+  "Хангамж": SUP
+  "Үндсэн хөрөнгө": FA
+  "Цалин": PAY
+  "Үйлдвэрлэл": MFG
+  "Төлөвлөлт": PLAN
+  "Тайлан": RPT
+  "Нэмэлт тайлан": ARPT
+  "Жагсаалт": LIST
+  "Дашбоард": DASH
+  "Процесс": PROC
+
+reports:
+  appendix: true              # "Хавсралт А" — bug бүрийн дэлгэрэнгүй, screenshot
+  # Гүйцэтгэгч / QA Tester / Author нь UI-ийн «Тест гүйцэтгэгч» талбараас (баримтад хэрэгслийн нэр орохгүй)
+
+# Smoke-ийн явцад цэс бүрийн товч/grid-ийг ЗӨВХӨН УНШИЖ бүртгэнэ (юу ч дарахгүй) → CRUD боломжтой
+# цэсүүдийг ангилна (Нэмэх + Устгах товчтой = автомат CRUD хийж болно).
+crud_scan:
+  enabled: true
+  scope: "[role=tabpanel], .dxbl-tabs-content, .tab-body"     # идэвхтэй табын агуулга
+  exclude: ".modulenavbar, .mainnavbar, [role=tablist], header, nav"
+  grid: ".dxbl-grid, [role=grid], table"
+  grid_header: "[role=columnheader], thead th, .dxbl-grid th"
+  process_words: ["Батлах", "Илгээх", "Цуцлах", "Approve", "Submit", "Send"]
+
+# Component-based E2E урсгал (crud.* алхмууд). Өгөгдөл ӨӨРЧИЛДӨГ тул зөвхөн allowed_hosts-д
+# таарах host дээр ажиллана (backend шалгана). 127.0.0.1/localhost — локал mock сайт.
+flow:
+  allowed_hosts: ["test*.smartapp.mn", "127.0.0.1", "localhost"]
+  step_timeout_s: 120
+  settle_ms: 300              # сүлжээ ийм хугацаанд тайван байвал ачаалал дууссан гэж үзнэ (smoke-тэй ижил)
+  tab_fields_wait_ms: 600     # форм шалгалт: дотоод табын талбар гарахыг хүлээх (settle-ийн дараа)
+  # форм шалгалт: жагсаалтын уншилтын товч (агуулсан үгээр). block-ийн үгтэй бол ХЭЗЭЭ Ч дарахгүй.
+  readonly_actions: ["Хэвлэх", "Print", "Excel", "Экспорт", "Export", "PDF харах", "файл харах", "Урьдчилан харах", "Preview"]
+  readonly_action_block: ["нэмэх", "устгах", "импорт", "import", "татах", "илгээх", "батлах", "бодох", "үүсгэх",
+                          "хадгалах", "хуулах", "засах", "цуцлах", "upload", "send", "delete"]
+  max_actions: 3
+  save_prefixes: ["Хадгалах", "Save"]   # «Хадгалах & Шинэ» мэт товчтой хуудас = шууд форм цэс
+  max_lookups: 15             # нэг формд нээх lookup-ийн дээд тоо
+  lookup_repeat_per_module: 1 # нэг модульд ижил нэртэй lookup-ийг хэдэн удаа шалгах (0 = үргэлж шалгах)
+  edit_rows: 3                # форм шалгалт: засварын горимд нээх бичлэгийн тоо (эхнийх нь бүрэн, бусад нь хурдан)
+  settle_cap_ms: 1500         # loading дууссаны дараа сүлжээ тайвшрахыг ДЭЭД тал нь ингэж хүлээнэ (polling-той апп)
+  save_timeout_ms: 15000      # Хадгалах дарснаас форм хаагдах хүртэлх дээд хугацаа
+  # ⚠ DevExpress Blazor-ийн DOM-оос (mock_crud дээр баталгаажсан) — бодит сайт дээр анх
+  # ажиллуулахдаа шалгаж, зөрвөл config/sites/<host>.yaml-д дарна.
+  selectors:
+    form_caption: ".dxbl-fl-cpt, label"
+    form_item: ".dxbl-fl-item, .dxbl-fl-gi"
+    field_input: "input:not([type=hidden]), textarea, select"
+    combobox: ".dxbl-combobox, .dxbl-dropdown-edit"
+    button: "button, [role=button], .dxbl-btn"
+    grid_row: "tr[role=row]:not(.dxbl-grid-header-row), .dxbl-grid tbody tr"
+    grid_search: ".dxbl-grid-search-box input, input[placeholder*='Хайх'], input[placeholder*='Search' i]"
+    list_option: "[role=option], .dxbl-listbox-item, .dxbl-list-box-item"
+    # Автомат CRUD: формын талбар биш input-ууд (grid шүүлтүүр, цэс, таб)
+    # grid-ийн НҮД/толгой доторх input (шүүлтүүр, мөрийн editor)-ийг хасна. Grid бүхэлдээ БИШ — SmartApp-ын
+    # жагсаалтын мөр дарахад нээгддэг засварын форм (popup edit form) нь dxbl-grid элементийн ДОТОР render хийгддэг.
+    input_exclude: "[role=columnheader], thead, .dxbl-grid-filter-row, [role=tablist], .modulenavbar, .mainnavbar, .dxbl-grid-search-box, .dxbl-grid td, .dxbl-grid th, [role=gridcell], .dxbl-toolbar"
+    # «Шинэ» дарахад гарах dropdown (баримтын төрөл сонгох г.м.)
+    # HR «Үйл ажиллагааны загвар»: toolbar-ын dropdown нь <dxbl-dropdown-dialog class="dxbl-toolbar-dropdown">
+    popup_menu: "[role=menu], .dxbl-dropdown-body, .dxbl-context-menu, .dxbl-menu-dropdown, .dxbl-dropdown-dialog, .dxbl-toolbar-dropdown"
+    popup_menu_item: "[role=menu] [role=menuitem], .dxbl-dropdown-body [role=menuitem], .dxbl-context-menu [role=menuitem], .dxbl-dropdown-body .dxbl-list-box-item, .dxbl-menu-dropdown .dxbl-menu-item, .dxbl-toolbar-dropdown .dxbl-menu-item, .dxbl-dropdown-dialog .dxbl-menu-item, .dxbl-toolbar-dropdown [role=menuitem], .dxbl-dropdown-dialog [role=menuitem]"
+  # «Шинэ»/toolbar dropdown-ын зүйлээс ЭДГЭЭР үгтэйг хэзээ ч дарахгүй (ж: «Баримт устгах», «Баримт засах»)
+  type_item_block: ["устгах", "засах", "батлах", "илгээх", "цуцлах", "хадгалах", "импорт", "бодох", "хуулах",
+                    "delete", "remove", "approve", "submit", "send", "save", "edit", "import", "copy"]
+  buttons:
+    add: ["Нэмэх", "Шинэ", "Add", "New"]
+    edit: ["Засах", "Edit"]
+    delete: ["Устгах", "Delete"]
+    save: ["Хадгалах", "Хадгалах & Гарах", "Хадгалаад гарах", "Save"]
+    select: ["Сонгох", "OK", "Select"]       # lookup цонхноос мөр сонгох (давхар дарахад сонгогдоогүй бол)
+    confirm: ["Тийм", "Yes", "OK", "Устгах"]
+    # автомат CRUD форм хаах (өгөгдөл өөрчлөхгүй); "Үгүй" = «Өөрчлөлтийг хадгалах уу?» асуултад
+    cancel: ["Болих", "Хаах", "Үгүй", "Cancel", "Close", "No", "×"]
+    # жагсаалтын шүүлтүүрийг хэрэглэх (форм шалгалт: хоосон жагсаалтын огнооны хүрээг сунгасны дараа)
+    filter: ["Шүүх", "Filter", "Сэргээх", "Refresh"]
+  # Автомат CRUD: талбарын шошгоноос утга таах (жижиг үсгээр, хэсэгчилсэн тохирол)
+  # Хадгалахад гарах validation анхааруулга (цонх/toast) — аппын алдаа биш (автомат CRUD: «шалгаж чадаагүй»)
+  validation_texts: ["оруулна уу", "сонгоно уу", "оруулна!", "татна уу", "дутуу", "буруу оруулсан",
+                     "шаардлагатай", "заавал", "сонгогдоогүй", "оруулаагүй", "хоосон байна", "хоосон байх", "required"]
+  # цонхны гарчиг ингэж эхэлбэл анхааруулга (SQL/exception агуулсан бол алдаа хэвээр — алдааг түрүүлж шалгана)
+  validation_titles: ["Анхаар", "Анхааруулга", "Хадгалах боломжгүй", "Warning"]
+  auto:
+    key_labels: ["нэр", "name", "гарчиг", "title", "тайлбар", "утга", "description"]
+    code_labels: ["код", "code", "дугаар"]
+    phone_labels: ["утас", "phone"]
+    email_labels: ["имэйл", "и-мэйл", "email", "e-mail"]
+    number_labels: ["тоо", "дүн", "үнэ", "хувь", "хэмжээ", "хоног", "amount", "qty"]
