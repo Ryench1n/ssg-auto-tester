@@ -1,8 +1,8 @@
 # SSG Auto Tester — Системийн ажиллагааны дэлгэрэнгүй тайлан
 
-**Огноо:** 2026-09-23
+**Огноо:** 2026-09-23 (шинэчилсэн: 2026-10-13 — §7)
 **Бэлтгэсэн:** Техникийн шинжилгээ, код review болон засварын дүн
-**Хамрах хүрээ:** `app/` бүх модуль (~3,300 мөр Python код), `config/`, `templates/`, `app/static/index.html`
+**Хамрах хүрээ:** `app/` бүх модуль (~11,400 мөр Python код), `config/`, `templates/`, `app/static/index.html`
 
 ---
 
@@ -38,13 +38,15 @@ app/
 ├── api.py              — FastAPI route-ууд, SSE stream, run удирдлага
 ├── config.py            — YAML тохиргоо ачаалах (default + site-specific deep-merge)
 ├── store.py             — SQLite CRUD
+├── retention.py         — runs/ хавтсыг цэвэрлэх бодлого (CLI: python -m app.retention)
 ├── models.py             — Өгөгдлийн бүтэц (Finding, ItemResult, RunData, TestCase, Bug)
 ├── runner/
 │   ├── session.py        — Нэвтрэлт (автомат + гар/manual горим), дахин нэвтрэлт
 │   ├── discovery.py       — Модуль/цэсний мод илрүүлэлт (DOM parse)
 │   ├── detectors.py       — DOM snapshot, HTTP/console/pageerror listener, алдаа ангилал
 │   ├── smoke.py           — Гол алгоритм: цэс бүрийг шалгах, recovery, orchestration
-│   ├── classify.py        — Finding → Bug, Test Case үүсгэх, GO/NO-GO логик
+│   ├── classify/          — Finding → Bug, Test Case үүсгэх, GO/NO-GO логик
+│   │                         (signature, severity, modules, testcases, bugs, verdict)
 │   └── severity.py        — Critical/Major/Minor эрэмбийн нэршил (xlsx/docx хоёрт нийтлэг)
 └── report/
     ├── build.py            — Тайлан угсрах (orchestration)
@@ -123,9 +125,9 @@ app/
 
 ## 5. Одоогийн байдал
 
-- **Автомат тест:** 29 тест (1 skip — LibreOffice суулгаагүй тул тайлан баталгаажуулалтын тест алгасагдана), **бүгд амжилттай**.
+- **Автомат тест:** 124 тест, **бүгд амжилттай** (2026-10-13; LibreOffice суусан тул тайлангийн тулгалтын тест мөн ажиллана).
 - **Бодит орчинд шалгагдсан:** testitsm.smartapp.mn (ITSM), testaccounting.smartapp.mn (Accounting) — 27-28 цэс бүхий модулиудаар давтан туршигдсан.
-- **Танигдсан хязгаарлалт:** LibreOffice (soffice) энэ машинд суугаагүй тул xlsx/docx тайлангийн автомат баталгаажуулалт (`verify_xlsx`/`verify_docx`) идэвхгүй — тайлан үүсэх боловч хэлбэрийн бодит зөрчлийг автоматаар шалгадаггүй.
+- ~~**Танигдсан хязгаарлалт:** LibreOffice суугаагүй тул тайлангийн автомат баталгаажуулалт идэвхгүй~~ — 2026-10-13-нд шийдэгдсэн (§7).
 
 ---
 
@@ -135,3 +137,19 @@ app/
 2. **Playwright Chromium-ыг зохих сүлжээнд (гэр/VPN) татаж, албан ёсны хувилбарт шилжих** — одоогийн `SSG_CHROMIUM_PATH` fallback нь ажиллагаатай ч урт хугацаанд албан ёсны хувилбар руу шилжсэн нь дээр.
 3. **`deploy_retry_wait_ms`-ийг цаашид ажиглалтаар нарийвчлах** — хэрэв 3 сек хэтэрхий богино байвал (503 давтагдвал) арай өсгөх шаардлагатай болж болно.
 4. **Backend талтай холбоо барих** — цэс бүрийн "эхний дуудлага 503" зан үйл нь SmartApp-ийн backend (.NET) талын шинж чанар тул хөгжүүлэгчийн багт мэдээлэх нь route warm-up-ыг сайжруулах боломж олгож магадгүй.
+
+---
+
+## 7. Шинэчлэл (2026-10-13)
+
+| # | Ажил | Үр дүн |
+|---|---|---|
+| 1 | **Хувилбарын хяналт** | `git init` (салбар `main`). `.gitignore`: `runs/`, `.venv/`, `templates/report_tpl.docx`, `.claude/settings.local.json`; `.gitattributes`-аар мөрийн төгсгөлийг нэгтгэв. |
+| 2 | **LibreOffice + Poppler** | winget-ээр суулгав. `verify.py` Windows-ийн стандарт байршлаас (`Program Files\LibreOffice`, winget Poppler) олдог болж, LibreOffice профайлын URI-г `file:///C:/...` хэлбэрт зассан — урьд нь PATH-д байхгүй тул тулгалт үргэлж `skipped` байв. |
+| 3 | **Том модулиудыг хуваав** | `app/flows/ui.py` (2011 мөр) → `app/flows/ui/` 9 модуль; `app/runner/classify.py` (875 мөр) → `app/runner/classify/` 6 модуль. Код өөрчлөлтгүй зөөгдсөн, `__init__` бүх нэрийг дахин экспортлодог тул гадаад import хэвээр. |
+| 4 | **Баримт бичиг** | README (суулгах, retention, CDP аюулгүй байдал, тест, бүтэц), энэ тайлан. |
+| 5 | **runs/ цэвэрлэх бодлого** | `app/retention.py` + `config → retention` (анхдагч унтраалттай). Dry-run анхдагч; төсөл бүрийн сүүлийн run хэзээ ч устахгүй. `Store.next_version` устгасны дараа дугаар давтахгүй болсон. |
+| 6 | **Аюулгүй байдал** | `DELETE /api/recorded` нь хадгалахтай ижил `host_reason` шалгалт хийдэг болов. CDP (remote debugging) горимын үлдэгдэл эрсдэл README-д баримтжсан. |
+
+**Үлдсэн зөвлөмж:** `runs/` одоогоор ~1.5 GB — `python -m app.retention --keep 10 --orphans` гэж эхлээд жагсааж
+харсны дараа `--apply`-аар цэвэрлэх; урт хугацаанд `retention.auto: true` болгох эсэхийг багаараа шийдэх.

@@ -23,7 +23,7 @@ SSG стандартын 2 тайланг гаргадаг локал вэб а�
 ### Локал (Python 3.11+)
 
 ```bash
-cd ssg-smoke-tester
+cd ssg-auto-tester
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 playwright install chromium          # Linux-д: playwright install --with-deps chromium
@@ -32,6 +32,15 @@ python scripts/make_report_template.py   # templates/report_tpl.docx-ийг (д�
 
 Тайлангийн тоон утгыг LibreOffice-оор давхар тулгадаг тул **LibreOffice** (`soffice`) болон `pdftotext`
 (poppler-utils) суулгахыг зөвлөж байна. Байхгүй бол тайлан үүснэ, гэхдээ тулгалт `skipped` гэж тэмдэглэгдэнэ.
+
+```powershell
+# Windows
+winget install --id TheDocumentFoundation.LibreOffice -e
+winget install --id oschwartz10612.Poppler -e
+```
+
+Windows-д суулгагч PATH-д нэмдэггүй ч `C:\Program Files\LibreOffice\program\soffice.exe` болон winget-ийн
+Poppler-ийг автоматаар олно (`app/report/verify.py`). Linux: `apt install libreoffice-calc libreoffice-writer poppler-utils`.
 
 ### Docker
 
@@ -76,7 +85,31 @@ python -m app --port 8080
    хүснэгт, xlsx/docx татах 2 том товч + screenshot zip, raw JSON, run.log.
 4. **Түүх** — өмнөх run-ууд, хоёр run-ыг харьцуулах (шинэ / засагдсан / хэвээр байгаа bug).
 
-Ижил төслийг дахин ажиллуулахад хувилбар автоматаар `v1.1`, `v1.2`… болно.
+Ижил төслийг дахин ажиллуулахад хувилбар автоматаар `v1.1`, `v1.2`… болно (хуучин run устгасан ч дугаар
+давтагдахгүй — хамгийн их `v1.N`-ээс үргэлжилнэ).
+
+### runs/ хавтсыг цэвэрлэх (retention)
+
+Run бүр screenshot, тайлан, лог хадгалдаг тул `runs/` хурдан томордог. Цэвэрлэх бодлого `config/default.yaml →
+retention`-д (анхдагч: бүгд унтраалттай — юу ч автоматаар устгахгүй):
+
+```yaml
+retention:
+  keep_per_project: 10   # төсөл бүрийн сүүлийн 10 run-ыг үлдээнэ (0 = хязгааргүй)
+  max_age_days: 90       # 90 хоногоос хуучныг устгана (0 = хязгааргүй)
+  auto: false            # true бол run дуусах бүрт автоматаар цэвэрлэнэ (run.log-д бичнэ)
+```
+
+Гараар (анхдагч нь **dry-run** — юу устгагдахыг л харуулна):
+
+```bash
+python -m app.retention --keep 10 --days 90            # жагсаана
+python -m app.retention --keep 10 --days 90 --apply    # устгана
+python -m app.retention --orphans --apply              # runs.db-д бүртгэлгүй хавтас (CLI run г.м.)
+```
+
+Төсөл бүрийн **хамгийн сүүлийн** run болон ажиллаж буй run хэзээ ч устгагдахгүй. `--orphans` нь зөвхөн run-ын
+нэрийн хэв маягтай (`<12 hex>`, `flow-*`, `explore-*`, `real-*`) хавтсыг хөндөнө.
 
 ## 3. Юу шалгадаг вэ
 
@@ -219,6 +252,14 @@ CLI: `python -m app.flows --url … --cdp [http://127.0.0.1:9222] …`. Урт �
 [тестийн sitekey](https://developers.cloudflare.com/turnstile/troubleshooting/testing/) тохируулах эсвэл
 captcha-г унтраахыг хөгжүүлэгчдэд санал болгоно.
 
+> ⚠ **CDP горимын аюулгүй байдал.** Remote debugging порт (9222) зөвхөн `127.0.0.1`-д нээгддэг ч **нэвтрэлт
+> шаардахгүй** — тэр Chrome нээлттэй байх хугацаанд энэ компьютер дээрх аль ч програм (хөтөч дэх хуудас биш,
+> локал процесс) түүнийг бүрэн удирдаж, нэвтэрсэн session-ээр SmartApp-д хандах боломжтой. Мөн профайл
+> (`%LOCALAPPDATA%\SSGAutoTester\chrome-profile`) cookie/session-ийг дискэнд хадгална. Иймд:
+> - зөвхөн өөрийн (хуваалцдаггүй) компьютер дээр, зөвхөн **тест орчны** бүртгэлээр ашиглана;
+> - тест дууссаны дараа тэр Chrome-ын цонхыг хаана (порт хаагдана);
+> - компьютер хуваалцдаг бол профайл хавтсыг устгаж session-ийг цэвэрлэнэ.
+
 ### Урсгал бичих (record → replay)
 
 Нарийн бизнес урсгалыг (баримт бүртгэх → батлах, цалин бодох …) автоматаар таах боломжгүй тул хүн **нэг удаа
@@ -325,7 +366,7 @@ timing:
 ## 5. Тест
 
 ```bash
-pytest                       # unit + mock сайт дээрх E2E (~1 мин)
+pytest                       # unit + mock сайт дээрх E2E (124 тест, ~10 мин)
 SSG_SKIP_E2E=1 pytest        # зөвхөн unit
 ```
 
@@ -341,6 +382,9 @@ SSG_SKIP_E2E=1 pytest        # зөвхөн unit
 - `tests/test_pipeline.py` — smoke + 2 flow нэг session-д (1 нэвтрэлт), нэг `FlowContext`, нэг тайланд
   `TC-FLOW-*`, session тасрахад түр зогсоод үргэлжлэх / хугацаа хэтрэхэд Blocked, `allowed_hosts`-гүй URL-д
   400, `/api/flows`, `runs.db` migration, нууц үг ямар ч файлд (xlsx/docx дотор ч) байхгүй.
+- `tests/test_formcheck.py` — форм шалгалт (засварын/шинэ форм, lookup, combo, мөрийн grid, long-poll сүлжээ).
+- `tests/test_record.py` — урсгал бичих → YAML → дахин тоглуулах, `/api/recorded`.
+- `tests/test_retention.py` — `runs/` цэвэрлэх бодлого, хувилбарын дугаар давтагдахгүй байх.
 - `tests/test_autocrud.py` — товч бүртгэл/ангилал, smoke-ийн дараах сонголт (зөвхөн `full` цэс хүлээн авна),
   автомат CRUD бүрэн мөчлөг (Харилцагч), бөглөж чадаагүй цэс алгасагдах (Ангилал — TC/bug-гүй), YAML ноорог
   ачаалагдах, каталогоос smoke-гүй сонгох, `menu_caps` каталог.
@@ -357,12 +401,15 @@ Mock сайтыг гараар ажиллуулах: `python tests/fixtures/mock
 ## 6. Бүтэц
 
 ```
-app/            __main__.py, api.py (FastAPI + SSE), store.py (SQLite), static/index.html
+app/            __main__.py, api.py (FastAPI + SSE), store.py (SQLite), retention.py (runs/ цэвэрлэх), static/index.html
 app/pipeline/   runner.py (PipelineRunner), stages.py (алхмын registry), session.py (гар нэвтрэлт, түр зогсолт)
-app/runner/     session.py, discovery.py, smoke.py, detectors.py, classify.py, severity.py, runlog.py
-app/flows/      engine.py, context.py, ui.py, steps/ (auth.*, crud.*), __main__.py (CLI)
-app/report/     xlsx_writer.py, docx_writer.py, verify.py, build.py
-config/         default.yaml, sites/*.yaml
+app/runner/     session.py, discovery.py, smoke.py, detectors.py, capabilities.py, browser.py, severity.py, runlog.py
+app/runner/classify/   signature → severity → modules → testcases → bugs → verdict (GO/NO-GO)
+app/flows/      engine.py, context.py, recorder.py, explore.py, draft.py, steps/ (auth, crud, auto, formcheck,
+                recorded), __main__.py (CLI)
+app/flows/ui/   DevExpress UI туслахууд: _js → base → wait → menu → page → lookup → lines → fields → grid
+app/report/     xlsx_writer.py, docx_writer.py, verify.py, build.py, rebuild.py
+config/         default.yaml, sites/*.yaml, recorded/*.yaml (UI-аас бичсэн урсгал)
 templates/      07/09 загвар, report_tpl.docx (scripts/make_report_template.py үүсгэнэ)
 tests/          pytest + fixtures/mock_site, fixtures/mock_crud, human_login.py (тестийн hook)
 runs/<id>/      тайлан, shots/, screenshots.zip, raw.json, events.jsonl, run.log, summary.json
@@ -383,17 +430,16 @@ runs/<id>/      тайлан, shots/, screenshots.zip, raw.json, events.jsonl, r
 6. **Хоосон Fail-ийн давтан шалгалт** — анхны үр дүн (Fail) хадгалагдаж, зөвхөн баталгаажуулалтын тэмдэглэл нэмнэ.
 7. **Токен сунгалт** тасарвал run түр зогсож, хэрэглэгч дахин гараар нэвтэрсний дараа тухайн цэсийг 1 удаа
    дахин шалгана; хоёр дахь удаа logout болбол `Blocked`.
-10. **Олон role** дэмжихгүй: flow YAML-ын `role` нь зөвхөн мэдээллийн чанартай — өөр бол анхааруулга логлоод
-    идэвхтэй (гараар нэвтэрсэн) session-ээр үргэлжилнэ. `auth.login fresh` дэмжигдэхгүй (тэмдэглэл үлдээнэ).
 8. **Модулийн товчлол** YAML-д байхгүй бол нэрийг латинаар транслитерац хийж эхний үсгүүдээс үүсгэнэ.
 9. **Screenshot** зөвхөн илрэлтэй цэсэд авна (1000 цэс × screenshot нь хэт их зай эзэлнэ).
+10. **Олон role** дэмжихгүй: flow YAML-ын `role` нь зөвхөн мэдээллийн чанартай — өөр бол анхааруулга логлоод
+    идэвхтэй (гараар нэвтэрсэн) session-ээр үргэлжилнэ. `auth.login fresh` дэмжигдэхгүй (тэмдэглэл үлдээнэ).
 
 ## 8. Мэдэгдэж буй хязгаарлалт
 
-- Бодит `*.smartapp.mn` орчин дээр туршаагүй (хөгжүүлэлтийн орчноос сүлжээгээр хандах боломжгүй байсан).
-  DOM selector-ууд промптод өгөгдсөн бүтэц (`.modulenavbar`, `.mainnavbar`, `role=treeitem`, `dxbl-*`) болон mock
-  сайт дээр баталгаажсан. **Эхлээд нэг модулиар** (`Нарийвчилсан тохиргоо → модуль сонгох`) туршиж, selector
-  зөрвөл `config/sites/<host>.yaml`-д засна уу.
+- Бодит тест орчнууд дээр (testaccounting, testitsm, testhr болон бусад `test*.smartapp.mn`) ажиллаж байгаа ч
+  шинэ сайтад **эхлээд нэг модулиар** (`Нарийвчилсан тохиргоо → модуль сонгох`) туршиж, selector зөрвөл
+  `config/sites/<host>.yaml`-д засна уу.
 - Гүйцэтгэл: цэс бүрт ≈ 3 сек хүлээлт + 1.5 сек хаасны дараах шалгалт ≈ 5 сек → 1000 цэс ≈ 80–90 мин.
   Recovery (reload ~35MB WASM) олон гарвал хугацаа уртасна; `timing.wait_ms`-ыг сервертэй тааруулна.
 - Нэг зэрэг нэг run ажиллуулахаар зохиосон (нэг хэрэглэгчийн локал хэрэгсэл).
