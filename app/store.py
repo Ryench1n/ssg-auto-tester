@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 from datetime import datetime
@@ -94,10 +95,12 @@ class Store:
         return cur.rowcount > 0
 
     def next_version(self, project: str) -> str:
-        """Ижил төсөлд дахин run хийвэл v1.0 → v1.1 → v1.2."""
+        """Ижил төсөлд дахин run хийвэл v1.0 → v1.1 → v1.2. Хуучин run устгагдсан ч (retention, «Устгах»)
+        дугаар давтагдахгүй — тоо биш, хамгийн их v1.N-ээс үргэлжилнэ."""
         with self._conn() as c:
-            n = c.execute("SELECT COUNT(*) FROM runs WHERE project=?", (project,)).fetchone()[0]
-        return f"v1.{n}"
+            rows = c.execute("SELECT version_label FROM runs WHERE project=?", (project,)).fetchall()
+        nums = [int(m.group(1)) for (v,) in rows if (m := re.fullmatch(r"v1\.(\d+)", v or ""))]
+        return f"v1.{max(len(rows), max(nums) + 1 if nums else 0)}"
 
     @staticmethod
     def _row(row: sqlite3.Row, with_summary: bool = True) -> dict:

@@ -22,6 +22,7 @@ from pydantic import BaseModel
 import yaml
 
 from app import config as appcfg
+from app import retention
 from app.config import RUNS_DIR, load_config
 from app.flows.engine import FlowConfigError, flow_code, flow_description, host_reason, load_flow
 from app.pipeline.runner import PipelineRunner
@@ -226,6 +227,26 @@ async def _run_job(run_id: str, live: LiveRun, cfg: dict) -> None:
         await _publish(live, "done", {"status": "error", "error": str(e)})
     finally:
         live.done = True
+    await asyncio.to_thread(_auto_prune, cfg, run_dir / "run.log")
+
+
+def _auto_prune(cfg: dict, log: Path) -> None:
+    """config → retention.auto бол run дууссаны дараа хуучин run-уудыг цэвэрлэнэ (алдаа run-д нөлөөлөхгүй)."""
+    if not (cfg.get("retention") or {}).get("auto"):
+        return
+    pol = retention.policy(cfg)
+    try:
+        res = retention.prune(store, RUNS_DIR, pol["keep_per_project"], pol["max_age_days"], apply=True,
+                              skip_ids={k for k, v in LIVE.items() if not v.done})
+        for r in res["runs"]:
+            LIVE.pop(r["id"], None)
+        msg = (f"[INFO] Retention: {len(res['runs'])} хуучин run устгав ({res['bytes'] / 1024 / 1024:.1f} MB)\n"
+               if res["runs"] else "")
+    except Exception as e:
+        msg = f"[WARN] Retention цэвэрлэгээ амжилтгүй: {e}\n"
+    if msg and log.parent.exists():
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(msg)
 
 
 @app.post("/api/runs")
@@ -445,7 +466,12 @@ async def save_recorded(req: RecordedReq):
 @app.delete("/api/recorded")
 async def delete_recorded(url: str, name: str):
     url = normalize_url(url)
-    host = urlparse(url or "").hostname or ""
+    if not url:
+        raise HTTPException(400, "URL заавал")
+    reason = host_reason(url, load_config(url))       # хадгалахтай ижил: зөвхөн зөвшөөрөгдсөн (тест) host
+    if reason:
+        raise HTTPException(400, reason)
+    host = urlparse(url).hostname or ""
     flows = appcfg.load_recorded(host)
     if name not in flows:
         raise HTTPException(404, "Бичсэн урсгал олдсонгүй")
