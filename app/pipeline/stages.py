@@ -233,23 +233,79 @@ class CrudStage(Stage):
 
 
 # ------------------------------------------------------------------- autocrud
-def auto_flow_spec(key: str, prefix: str) -> dict:
+def auto_flow_spec(key: str, prefix: str, prefer: dict | None = None) -> dict:
     """Цэс бүрт үүсгэх автомат CRUD урсгал. Өгөгдлийн түлхүүр урсгал бүрт өөр (prefix) —
-    нэг FlowContext хуваалцдаг тул өмнөх цэсийн бичлэгт хүрэхээс сэргийлнэ."""
+    нэг FlowContext хуваалцдаг тул өмнөх цэсийн бичлэгт хүрэхээс сэргийлнэ.
+    prefer: {lookup шошго: мастер бичлэгийн утга} — тест орчинд хоосон lookup-д автоматаар үүсгэсэн бичлэг."""
     rec, fld = f"{prefix}_rec", f"{prefix}_field"
+    create = {"menu": key, "save_as": rec, "field_as": fld, "try_as": f"{prefix}_try", "values_as": f"{prefix}_vals"}
+    if prefer:
+        create["prefer"] = dict(prefer)
     return {"steps": [
-        {"uses": "crud.auto_create", "name": "Автомат бүртгэл (форм илрүүлж бөглөх)",
-         "with": {"menu": key, "save_as": rec, "field_as": fld}},
+        {"uses": "crud.auto_create", "name": "Автомат бүртгэл (форм илрүүлж бөглөх)", "with": create},
         # menu: форм шинэ таб дээр нээгддэг сайтад алхам бүр жагсаалтын таб руу буцна (идэвхтэй бол юу ч хийхгүй)
         {"uses": "crud.search", "name": "Бүртгэснээ хайж олох", "with": {"menu": key, "text": "{%s}" % rec}},
         {"uses": "crud.auto_update", "name": "Автомат засвар",
          "with": {"menu": key, "find": "{%s}" % rec, "field": "{%s}" % fld, "save_as": rec}},
-        {"uses": "crud.search", "name": "Засварыг шалгах", "with": {"menu": key, "text": "{%s}" % rec}},
+        # Засвар + бүртгэх үед бөглөсөн БҮХ талбар хадгалагдсаныг бичлэгийг дахин нээж шалгана
+        {"uses": "crud.auto_verify", "name": "Засвар болон бүх талбар хадгалагдсаныг шалгах",
+         "with": {"menu": key, "find": "{%s}" % rec, "field": "{%s}" % fld, "values": f"{prefix}_vals"}},
         {"uses": "crud.delete", "name": "Цэвэрлэх (устгах)", "always": True,
          "with": {"menu": key, "find": "{%s}" % rec}},
         {"uses": "crud.search", "name": "Устгагдсаныг шалгах",
          "with": {"menu": key, "text": "{%s}" % rec, "expect": "absent"}},
+        # Өмнөх алхам Fail болсон ч (ж: «Хадгалах боломжгүй» гарсан ч бичлэг үүссэн) run_tag-тай өгөгдөл үлдээхгүй
+        {"uses": "crud.auto_cleanup", "name": "Тестийн өгөгдөл үлдээгүйг шалгах", "always": True,
+         "with": {"menu": key, "data": prefix}},
+        {"uses": "crud.auto_empty_save", "name": "Хоосон форм хадгалахад анхааруулга гарах (сөрөг тест)",
+         "always": True, "with": {"menu": key}},
     ]}
+
+
+def master_setup_spec(key: str, prefix: str) -> dict:
+    """Хамааралтай цэсийн lookup-д хэрэгтэй мастер бичлэгийг үүсгэж ҮЛДЭЭНЭ (master_teardown_spec устгана)."""
+    rec = f"{prefix}_rec"
+    return {"steps": [
+        {"uses": "crud.auto_create", "name": "Мастер бичлэг үүсгэх (хамааралтай цэсүүдэд)",
+         "with": {"menu": key, "save_as": rec, "field_as": f"{prefix}_field", "try_as": f"{prefix}_try"}},
+        {"uses": "crud.search", "name": "Мастер бичлэгийг хайж олох", "with": {"menu": key, "text": "{%s}" % rec}},
+    ]}
+
+
+def master_teardown_spec(key: str, prefix: str) -> dict:
+    rec = f"{prefix}_rec"
+    return {"steps": [
+        {"uses": "crud.delete", "name": "Мастер бичлэгийг устгах", "always": True,
+         "with": {"menu": key, "find": "{%s}" % rec}},
+        {"uses": "crud.auto_cleanup", "name": "Мастер өгөгдөл үлдээгүйг шалгах", "always": True,
+         "with": {"menu": key, "data": prefix}},
+    ]}
+
+
+# Lookup-ийн шошго ийм үгээр төгссөн цэс нь мастер биш туслах ангилал (ж: «Харилцагчийн бүлэг»)
+_NOT_MASTER = ("бүлэг", "төрөл", "ангилал", "загвар", "тохиргоо")
+
+
+def master_for(label: str, keys: list[str]) -> str | None:
+    """Хоосон lookup-ийн шошго («Ажилтан») → тэр өгөгдлийг үүсгэх цэс («Ажилтан», «Ажилтны жагсаалт»).
+    Яг ижил нэр > шошгоор эхэлсэн > язгуураар эхэлсэн (монгол хэлний хувилал: Ажилтан → Ажилтны)."""
+    lab = (label or "").strip().lower()
+    if len(lab) < 3:
+        return None
+    stem = lab[:max(4, len(lab) - 2)]
+    best = None
+    for k in keys:
+        try:
+            name = menu_from_key(k).name.strip().lower()
+        except ValueError:
+            continue
+        rest = name[len(lab):] if name.startswith(lab) else name[len(stem):]
+        if any(w in rest for w in _NOT_MASTER) and not any(w in lab for w in _NOT_MASTER):
+            continue
+        score = 3 if name == lab else 2 if name.startswith(lab) else 1 if len(lab) >= 5 and name.startswith(stem) else 0
+        if score and (best is None or (score, -len(name)) > best[0]):
+            best = ((score, -len(name)), k)
+    return best[1] if best else None
 
 
 @register
@@ -284,24 +340,10 @@ class AutoCrudStage(Stage):
         for key in keys:
             if pipe.halt.is_set():
                 break
-            item = menu_from_key(key)
             code = pipe.next_auto_code()
-            name = f"auto: {menu_path(item)}"
-            cfg = {**pipe.cfg, "flows": {**(pipe.cfg.get("flows") or {}), name: auto_flow_spec(key, code.lower())}}
-            eng = FlowEngine(pipe.url, name, cfg, pipe.run_dir, ctx=pipe.flow_ctx, runlog=pipe.runlog,
-                             session=pipe.session, cancel_event=pipe.halt, emit=pipe.emit, run_id=pipe.run_id,
-                             code=code, meta={"auto": True, "menu": menu_path(item), "menu_key": key})
-            run = await eng.execute(pipe.page, pipe.col)
-            try:
-                await ui.close_form(eng)          # дараагийн цэсэнд нээлттэй форм/цонх саад болохгүй
-                await ui.clear_toasts(eng)        # хуучин анхааруулгын toast дараагийн цэсийг Fail болгохгүй
-            except Exception:
-                pass
-            pipe.data.flows.append(run.to_dict())
+            run = await self._flow(pipe, key, code, auto_flow_spec(key, code.lower()))
             runs.append(run)
-            label = f"алгассан: {run.meta['skipped']}" if run.meta.get("skipped") else run.status
-            pipe.data.timeline.append(TimelineEvent(now_iso(), f"Автомат CRUD «{menu_path(item)}»", label,
-                                                    f"run_tag {run.run_tag}"))
+        runs = await self._retry_with_masters(pipe, keys, runs)
         tested = [r for r in runs if not r.meta.get("skipped")]
         n_pass = sum(1 for r in tested if r.status == M.PASS)
         msg = (f"{len(keys)} цэс: шалгасан {len(tested)} (Pass {n_pass}), "
@@ -315,6 +357,83 @@ class AutoCrudStage(Stage):
         if any(r.status == M.BLOCKED for r in tested) or len(runs) < len(keys):
             return M.BLOCKED, msg
         return M.PASS, msg
+
+    async def _flow(self, pipe: "PipelineRunner", key: str, code: str, spec: dict, title: str = "",
+                    meta: dict | None = None, replace_at: int | None = None):
+        """Нэг автомат урсгалыг ажиллуулж pipe.data.flows-д нэмнэ (replace_at — өмнөх оролдлогын оронд)."""
+        item = menu_from_key(key)
+        name = title or f"auto: {menu_path(item)}"
+        cfg = {**pipe.cfg, "flows": {**(pipe.cfg.get("flows") or {}), name: spec}}
+        eng = FlowEngine(pipe.url, name, cfg, pipe.run_dir, ctx=pipe.flow_ctx, runlog=pipe.runlog,
+                         session=pipe.session, cancel_event=pipe.halt, emit=pipe.emit, run_id=pipe.run_id,
+                         code=code, meta={"auto": True, "menu": menu_path(item), "menu_key": key, **(meta or {})})
+        run = await eng.execute(pipe.page, pipe.col)
+        try:
+            await ui.close_form(eng)          # дараагийн цэсэнд нээлттэй форм/цонх саад болохгүй
+            await ui.clear_toasts(eng)        # хуучин анхааруулгын toast дараагийн цэсийг Fail болгохгүй
+        except Exception:
+            pass
+        if replace_at is None:
+            pipe.data.flows.append(run.to_dict())
+        else:
+            pipe.data.flows[replace_at] = run.to_dict()
+        label = f"алгассан: {run.meta['skipped']}" if run.meta.get("skipped") else run.status
+        pipe.data.timeline.append(TimelineEvent(now_iso(), f"Автомат CRUD «{menu_path(item)}»"
+                                                + (" (мастер)" if (meta or {}).get("setup") else ""), label,
+                                                f"run_tag {run.run_tag}"))
+        return run
+
+    async def _retry_with_masters(self, pipe: "PipelineRunner", keys: list[str], runs: list) -> list:
+        """Тест орчинд хоосон lookup («Ажилтан») улмаас алгассан цэсүүд: тохирох мастер цэсээр бичлэг үүсгэж
+        (устгалгүй үлдээгээд) тэдгээрийг дахин ажиллуулна, эцэст нь мастер бичлэгийг устгана."""
+        waiting: dict[str, list] = {}
+        for r in runs:
+            if r.meta.get("skipped") and r.meta.get("needs"):
+                waiting.setdefault(r.meta["needs"], []).append(r)
+        if not waiting:
+            return runs
+        pool = list(dict.fromkeys(list(keys) + [c["key"] for c in crud_candidates(pipe.data.results or [])]))
+        out = list(runs)
+        for label, deps in waiting.items():
+            if pipe.halt.is_set():
+                break
+            dep_keys = {r.meta["menu_key"] for r in deps}
+            mkey = master_for(label, [k for k in pool if k not in dep_keys])
+            if not mkey:
+                for r in deps:
+                    self._annotate(pipe, r, f"«{label}» өгөгдлийг үүсгэх мастер цэс сонгогдоогүй — тэр цэсийг "
+                                            "автомат CRUD-д сонговол түрүүлж үүсгээд дахин оролдоно")
+                continue
+            mcode = pipe.next_auto_code("M")
+            mp = mcode.lower()
+            mpath = menu_path(menu_from_key(mkey))
+            setup = await self._flow(pipe, mkey, mcode, master_setup_spec(mkey, mp), f"master: {mpath}",
+                                     {"setup": True, "for": label})
+            value = pipe.flow_ctx.data.get(f"{mp}_rec")
+            if setup.status != M.PASS or not value:
+                for r in deps:
+                    self._annotate(pipe, r, f"«{label}» мастер бичлэгийг «{mpath}» цэсээр үүсгэж чадсангүй "
+                                            f"({setup.meta.get('skipped') or setup.status})")
+            else:
+                for r in deps:
+                    if pipe.halt.is_set():
+                        break
+                    at = next(i for i, f in enumerate(pipe.data.flows)
+                              if f.get("code") == r.code and f.get("flow") == r.flow)
+                    again = await self._flow(pipe, r.meta["menu_key"], r.code,
+                                             auto_flow_spec(r.meta["menu_key"], r.code.lower(), {label: value}),
+                                             meta={"master": {"label": label, "menu": mpath}}, replace_at=at)
+                    out[out.index(r)] = again
+            await self._flow(pipe, mkey, mcode, master_teardown_spec(mkey, mp), f"master-cleanup: {mpath}",
+                             {"setup": True, "for": label})
+        return out
+
+    @staticmethod
+    def _annotate(pipe: "PipelineRunner", run, hint: str) -> None:
+        run.meta["skipped"] = f"{run.meta['skipped']} [{hint}]"
+        for f in pipe.data.flows:
+            if f.get("code") == run.code and f.get("flow") == run.flow:
+                f["meta"]["skipped"] = run.meta["skipped"]
 
 
 # ------------------------------------------------------------------ formcheck

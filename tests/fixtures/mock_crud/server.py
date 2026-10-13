@@ -27,6 +27,9 @@ class CrudState:
         self.longpoll = False
         self.crash_menu = False     # «Робот» цэс (Blazor уналт → апп эвдрэх) нэмэх
         self.rich = False           # «Ажил» цэс (бичих → тоглуулахын хүнд тохиолдлууд)
+        # Автомат CRUD-ийн сайжруулалт: мастер өгөгдөл (Ажилтан → Чөлөө), DateEdit-ийг шошгоор таних,
+        # засварт талбар алга болох bug, validation-гүй хоосон хадгалалт, алдаа гарсан ч хадгалагдах
+        self.deps = False
         self.jobs_created = self.jobs_deleted = 0
         self.stopping = threading.Event()
 
@@ -94,6 +97,14 @@ def make_handler(state: CrudState):
                 extra += "{name: 'Ажил', href: '/md/jobs', kind: 'jobs'},"
                 extra += "{name: 'Нэхэмжлэх', href: '/md/invoice', kind: 'invoice'},"
                 extra += "{name: 'Үйл ажиллагааны загвар', href: '/md/act', kind: 'act'},"
+            if state.deps:
+                extra += "{name: 'Ажилтан', href: '/md/emp', kind: 'emp'},"
+                extra += "{name: 'Чөлөө', href: '/md/leave', kind: 'leave'},"
+                extra += "{name: 'Тэмдэглэл', href: '/md/note', kind: 'note'},"
+                extra += "{name: 'Төсөл', href: '/md/proj', kind: 'proj'},"
+                extra += "{name: 'Түгжээ', href: '/md/lock', kind: 'lock'},"
+                extra += "{name: 'Давтамж', href: '/md/sched', kind: 'sched'},"
+                extra += "{name: 'И-баримт', href: '/md/ebar', kind: 'ebar'},"
             html = html.replace(b"/*EXTRA_ITEMS*/", extra.encode())
             return self._send(200, html, "text/html; charset=utf-8")
 

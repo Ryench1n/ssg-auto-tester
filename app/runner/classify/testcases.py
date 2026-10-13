@@ -130,6 +130,8 @@ def build_test_cases(run: RunData, cfg: dict, executor: str, date: str) -> tuple
             tcs.extend(_form_tcs(fl, executor, date, auto))
             continue
         for s in fl.get("steps") or []:
+            if s.get("status") == M.BLOCKED and s.get("category") == "na":
+                continue        # хамаарахгүй (ж: заавал талбаргүй формын сөрөг тест) — TC/тооцоонд орохгүй
             args = json.dumps(s.get("args") or {}, ensure_ascii=False)
             pre = f"Нэвтэрсэн (гараар); run_tag={fl.get('run_tag', '')}"
             if s.get("requires"):
@@ -200,8 +202,9 @@ def flow_step_key(flow: str, index: int) -> str:
 
 def tested_flows(run: RunData) -> list[dict]:
     """TC/bug болох урсгалууд — автомат CRUD «шалгаж чадаагүй» (meta.skipped) урсгалыг хасна
-    (формыг автоматаар бөглөж чадаагүй нь аппын алдаа биш, GO/NO-GO-г хиймлээр унагахгүй)."""
-    return [f for f in run.flows if not (f.get("meta") or {}).get("skipped")]
+    (формыг автоматаар бөглөж чадаагүй нь аппын алдаа биш, GO/NO-GO-г хиймлээр унагахгүй) болон мастер
+    өгөгдөл бэлтгэх/цэвэрлэх туслах урсгалыг (meta.setup) хасна."""
+    return [f for f in run.flows if not (f.get("meta") or {}).get("skipped") and not (f.get("meta") or {}).get("setup")]
 
 
 def _fmt_dur(seconds: float) -> str:

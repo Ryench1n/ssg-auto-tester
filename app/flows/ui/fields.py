@@ -111,9 +111,10 @@ async def peek_line_lookups(env: "FlowEngine", what: str, limit: int = 3) -> dic
     return out
 
 
-async def pick_option(env: "FlowEngine", label: str) -> str:
+async def pick_option(env: "FlowEngine", label: str, want: str = "") -> str:
     """Сонголтын талбарт (select / combobox / lookup "...") эхний боломжит утгыг сонгоно.
-    Сонгосон утгын текстийг, чадахгүй бол "" буцаана. Сонгох нь өгөгдөл өөрчлөхгүй."""
+    want: энэ текст агуулсан мөр/утгыг сонгох (ж: автомат CRUD-ийн үүсгэсэн мастер бичлэг) — олдохгүй бол
+    эхний утга. Сонгосон утгын текстийг, чадахгүй бол "" буцаана. Сонгох нь өгөгдөл өөрчлөхгүй."""
     info = await find_field(env, label)
     page = env.page
     loc = page.locator("[data-ssg-field='1']")
@@ -125,12 +126,15 @@ async def pick_option(env: "FlowEngine", label: str) -> str:
         await loc.select_option(index=1 if n > 1 else 0)
         picked = await loc.evaluate("e => e.options[e.selectedIndex] ? e.options[e.selectedIndex].text : ''")
     elif info.get("lookup"):
-        picked = await pick_from_lookup(env, f"'{label}' талбарын сонголтын")
+        picked = await pick_from_lookup(env, f"'{label}' талбарын сонголтын", want=want) if want else ""
+        if not picked:
+            picked = await pick_from_lookup(env, f"'{label}' талбарын сонголтын")
         if not picked:
             return ""
     elif info["combo"]:
-        js = r"""(s) => { const v = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-          const o = Array.from(document.querySelectorAll(s)).filter(v).find(x => (x.innerText || '').trim());
+        js = r"""([s, want]) => { const v = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const all = Array.from(document.querySelectorAll(s)).filter(v).filter(x => (x.innerText || '').trim());
+          const o = (want && all.find(x => x.innerText.includes(want))) || all[0];
           if (!o) return ''; const t = o.innerText.trim(); o.click(); return t; }"""
         # 1) input дээр дарах  2) нээгдэхгүй бол dropdown (▾) товч — readonly ComboBox-д input дарахад нээгддэггүй
         for opener in ("input", "button"):
@@ -145,7 +149,7 @@ async def pick_option(env: "FlowEngine", label: str) -> str:
             except Exception:
                 continue
             for _ in range(8 if opener == "input" else 16):
-                picked = await page.evaluate(js, sel_payload(env)["list_option"])
+                picked = await page.evaluate(js, [sel_payload(env)["list_option"], want])
                 if picked:
                     break
                 await asyncio.sleep(0.25)
@@ -293,7 +297,8 @@ async def find_field(env: "FlowEngine", label: str, wait_s: float = 0.0) -> dict
         await asyncio.sleep(0.15)
 
 
-async def fill_field(env: "FlowEngine", label: str, value) -> None:
+async def fill_field(env: "FlowEngine", label: str, value, as_date: bool = False) -> None:
+    """as_date: DateEdit (▾ товчтой тул combo мэт) — жагсаалтаас сонгохгүй, огноог бичээд Tab."""
     info = await find_field(env, label)
     if info["readonly"]:
         raise StepFailed(f"'{label}' талбар засах боломжгүй (readonly)")
@@ -305,7 +310,7 @@ async def fill_field(env: "FlowEngine", label: str, value) -> None:
     if info["tag"] == "select":
         await loc.select_option(label=text)
         return
-    if info["combo"]:
+    if info["combo"] and not as_date:
         await loc.fill("")
         await loc.press_sequentially(text, delay=20)
         await settle(env, 5)

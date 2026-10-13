@@ -30,10 +30,14 @@ const __skipInput = (sel, i) => {
 const __lookupBtn = (sel, i) => {
   let el = i.parentElement;
   for (let d = 0; d < 3 && el; d++, el = el.parentElement) {
-    if (Array.from(el.querySelectorAll('input, textarea, select')).filter(__vis).length > 2) break;
+    const inputs = Array.from(el.querySelectorAll('input, textarea, select')).filter(__vis);
+    if (inputs.length > 2) break;
+    // Товч энэ талбарынх: DOM дарааллаар товчны өмнөх хамгийн ойрын талбар нь i (2 талбартай жижиг формд
+    // хөрш lookup-ийн "..." товчийг текст талбарынх гэж андуурахаас сэргийлнэ)
+    const owner = (b) => inputs.filter(x => x.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING).pop();
     const b = Array.from(el.querySelectorAll('button, [role=button], .dxbl-btn')).filter(__vis).find(x => {
       const t = __txt(x), meta = ((x.getAttribute('title') || '') + ' ' + (x.getAttribute('aria-label') || '')).toLowerCase();
-      return /^(\.\.\.|…)$/.test(t) || /сонго|lookup|browse|select|…|\.\.\./.test(meta);
+      return (/^(\.\.\.|…)$/.test(t) || /сонго|lookup|browse|select|…|\.\.\./.test(meta)) && owner(x) === i;
     });
     if (b) return b;
   }

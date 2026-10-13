@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
+from app import models as M
 from app.config import TEMPLATES_DIR
 from app.models import RunData
 from app.report.docx_writer import write_report_docx
@@ -104,6 +105,41 @@ def form_compare(run: RunData, prev: dict | None) -> dict:
     }
 
 
+# Автомат CRUD-ийн «шалгаж чадаагүй» шалтгааны ангилал (алхмын StepBlocked.category) → хүнд ойлгомжтой нэр
+SKIP_KINDS = {
+    "nodata": "Тест орчинд лавлах (мастер) өгөгдөл алга",
+    "workflow": "Форм тусгай үйлдэл шаарддаг (мэдээлэл татах, хуваарь …)",
+    "validation": "Систем автоматаар бөглөсөн утгыг хүлээж аваагүй",
+    "": "Хэрэгсэл формыг таньж / бөглөж чадаагүй",
+}
+
+
+def auto_skip_kind(flow: dict) -> str:
+    st = next((s for s in flow.get("steps") or [] if s.get("status") == M.BLOCKED), {})
+    cat = st.get("category") or ""
+    return cat if cat in SKIP_KINDS else ""
+
+
+def auto_skip_counts(flows: list[dict]) -> list[dict]:
+    """[{kind, label, count, menus}] — алгассан автомат CRUD цэсүүдийг шалтгаанаар нь бүлэглэнэ."""
+    out: dict[str, dict] = {}
+    for f in flows:
+        meta = f.get("meta") or {}
+        if not (meta.get("auto") and meta.get("skipped")) or meta.get("setup"):
+            continue
+        k = auto_skip_kind(f)
+        g = out.setdefault(k, {"kind": k, "label": SKIP_KINDS[k], "count": 0, "menus": []})
+        g["count"] += 1
+        g["menus"].append(meta.get("menu") or f["flow"])
+    return sorted(out.values(), key=lambda g: -g["count"])
+
+
+def leftovers(flows: list[dict]) -> list[dict]:
+    """Устгаж чадаагүй тестийн өгөгдөл (crud.auto_cleanup → meta.leftover) — гараар цэвэрлэх жагсаалт."""
+    return [{"menu": (f.get("meta") or {}).get("menu") or f["flow"], "items": f["meta"]["leftover"]}
+            for f in flows if (f.get("meta") or {}).get("leftover")]
+
+
 def generate_reports(run: RunData, cfg: dict, run_dir: Path, verify: bool = True,
                      prev: dict | None = None) -> dict:
     run_dir = Path(run_dir)
@@ -162,8 +198,11 @@ def generate_reports(run: RunData, cfg: dict, run_dir: Path, verify: bool = True
         "verification": verification,
         "run_tag": run.run_tag,
         "draft": run.draft,
+        "auto_skips": auto_skip_counts(run.flows),
+        "leftovers": leftovers(run.flows),
         "flows": [{"flow": f["flow"], "code": f.get("code"), "status": f.get("status"), "data": f.get("data"),
                    "auto": bool((f.get("meta") or {}).get("auto")),
+                   "setup": bool((f.get("meta") or {}).get("setup")),
                    "skipped": (f.get("meta") or {}).get("skipped", ""),
                    "steps": [{"index": s["index"], "name": s["name"], "status": s["status"],
                               "message": s.get("message", "")} for s in f.get("steps") or []]}

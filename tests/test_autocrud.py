@@ -252,7 +252,8 @@ def test_journal_with_lines_full_crud(after_smoke):
     # ХАВХ: бодит (tag-гүй) гүйлгээ анхнаасаа ФОКУСЛАГДСАН; «Засах/Устгах» фокус дээр ажилладаг —
     # автомат CRUD тэр бичлэгийг хэзээ ч засаж/устгах ёсгүй (фокусыг манай мөр рүү шилжүүлж шалгадаг)
     assert after_smoke["srv"].state.untagged_touched == 0
-    assert [s["status"] for s in j["steps"]] == [M.PASS] * 6, [(s["name"], s["message"]) for s in j["steps"]]
+    # 8 алхам: бүртгэх, хайх, засах, бүх талбарыг дахин нээж шалгах, устгах, устгагдсаныг шалгах, цэвэрлэгээ, сөрөг тест
+    assert [s["status"] for s in j["steps"]] == [M.PASS] * 8, [(s["name"], s["message"]) for s in j["steps"]]
 
 
 @e2e
@@ -260,7 +261,10 @@ def test_dropdown_new_button_is_skipped(after_smoke):
     t = after_smoke["data"].flows[3]
     assert t["meta"]["opened"] == "menu" and "Орлого" in t["meta"]["skipped"]
     assert t["meta"]["probe"]["menus"] and t["steps"][0]["screenshot"]
-    assert [s["status"] for s in t["steps"]] == [M.BLOCKED] * 6
+    # Бүртгэл алгассан тул CRUD алхмууд Blocked; цэвэрлэгээ (хадгалаагүй — өгөгдөлгүй) ба сөрөг тест (төрөл сонгох
+    # цэс) always тул ажиллаад «хамаарахгүй» (N/A)
+    assert [s["status"] for s in t["steps"]] == [M.BLOCKED] * 8
+    assert [s["category"] for s in t["steps"][6:]] == ["na", "na"]
 
 
 @e2e

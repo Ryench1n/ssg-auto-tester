@@ -25,7 +25,20 @@ DEFAULT_LABELS = {
     "phone_labels": ["утас", "phone"],
     "email_labels": ["имэйл", "и-мэйл", "email", "e-mail"],
     "number_labels": ["тоо", "дүн", "үнэ", "хувь", "хэмжээ", "хоног", "amount", "qty"],
+    # DevExpress DateEdit нь ▾ товчтой тул DOM-оор (slDate г.м. класс таарахгүй үед) combo мэт харагддаг —
+    # шошгоор нь огноо гэж таниад сонгохын оронд огноо бичнэ (HR «Төрсөн огноо»)
+    "date_labels": ["огноо", "date"],
+    "birth_labels": ["төрсөн", "birth"],          # төрсөн огноо — өнөөдөр биш (насны шалгалт)
+    # Validation мессеж эдгээрийг агуулбал форм тусгай үйлдэл шаарддаг (И-баримт «Мэдээлэл татна уу!»,
+    # Давтамжит гүйлгээ «Хуваарь оруулна!») — автоматаар хийхгүй, ангилж мэдээлнэ
+    "workflow_texts": ["татна уу", "татах", "хуваарь"],
 }
+
+
+def validation_kind(message: str, auto_cfg: dict | None = None) -> str:
+    """Систем хүлээж аваагүй шалтгааны ангилал: "workflow" (тусгай үйлдэл) | "validation" (утга таарсангүй)."""
+    words = (auto_cfg or {}).get("workflow_texts") or DEFAULT_LABELS["workflow_texts"]
+    return "workflow" if _match(message, words) else "validation"
 
 
 def _match(label: str, words: list[str]) -> bool:
@@ -39,10 +52,29 @@ def _uid(args: dict) -> str:
     return m.group(1).upper() if m else ""
 
 
-def today_str(fields: list[dict]) -> str:
-    """Өнөөдрийн огноо — формд бөглөгдсөн өөр огноо (ж: «Баримтын огноо 2026-09-30» эсвэл 30.09.2026) байвал
-    түүний форматаар, үгүй бол YYYY-MM-DD."""
-    d = datetime.date.today()
+def is_date_field(f: dict, words: dict | None = None) -> bool:
+    """DOM-оор огноо (type=date, slDate …), эсвэл шошго нь «огноо» бөгөөд lookup/select биш (DateEdit-ийг combo
+    гэж андуурахаас сэргийлнэ)."""
+    if f.get("date"):
+        return True
+    if f.get("lookup") or f.get("tag") == "select" or f.get("type") in ("checkbox", "radio", "number"):
+        return False
+    return _match(f.get("label") or "", (words or DEFAULT_LABELS).get("date_labels") or DEFAULT_LABELS["date_labels"])
+
+
+def date_value(label: str, fields: list[dict], words: dict | None = None) -> str:
+    """Огнооны талбарын утга: төрсөн огноо бол 30 жилийн өмнө, бусад нь өнөөдөр (формын огнооны форматаар)."""
+    w = (words or DEFAULT_LABELS).get("birth_labels") or DEFAULT_LABELS["birth_labels"]
+    if _match(label, w):
+        t = datetime.date.today()
+        return today_str(fields, t.replace(year=t.year - 30, day=min(t.day, 28)))
+    return today_str(fields)
+
+
+def today_str(fields: list[dict], d: datetime.date | None = None) -> str:
+    """Өнөөдрийн (эсвэл d) огноо — формд бөглөгдсөн өөр огноо (ж: «Баримтын огноо 2026-09-30» эсвэл 30.09.2026)
+    байвал түүний форматаар, үгүй бол YYYY-MM-DD."""
+    d = d or datetime.date.today()
     for f in fields:
         v = (f.get("value") or "").strip()
         m = re.fullmatch(r"\d{4}([-./])\d{2}\1\d{2}", v)
@@ -68,7 +100,7 @@ def plan_values(fields: list[dict], tag: str, auto_cfg: dict,
     phone_w, email_w, num_w = words["phone_labels"], words["email_labels"], words["number_labels"]
 
     def is_choice(f: dict) -> bool:
-        return f["tag"] == "select" or bool(f.get("combo")) or bool(f.get("lookup"))
+        return not is_date_field(f, words) and (f["tag"] == "select" or bool(f.get("combo")) or bool(f.get("lookup")))
 
     def is_text(f: dict) -> bool:
         return f["tag"] in ("input", "textarea") and f["type"] in TEXT_TYPES and not is_choice(f)
@@ -80,7 +112,7 @@ def plan_values(fields: list[dict], tag: str, auto_cfg: dict,
 
     # DevExpress ComboBox (гараар бичих боломжгүй) input нь readonly — гэхдээ жагсаалтаас сонгож болно
     empty = [f for f in fields if (not f["readonly"] or f.get("combo")) and is_empty(f)]
-    texts = [f for f in empty if is_text(f) and not f.get("date")]
+    texts = [f for f in empty if is_text(f) and not is_date_field(f, words)]
     # Түлхүүр: заавал (*) нэр/утга төрлийн → аль ч нэр/утга → заавал текст → код → эхний текст
     key_f = (next((f for f in texts if f["required"] and _match(f["label"], key_w)), None)
              or next((f for f in texts if _match(f["label"], key_w)), None)
@@ -96,8 +128,8 @@ def plan_values(fields: list[dict], tag: str, auto_cfg: dict,
             values[label] = code_val if _match(label, code_w) else text_val
         elif not required:
             continue            # заавал биш талбарыг хөндөхгүй
-        elif f.get("date"):
-            values[label] = today_str(fields)   # формын бусад огнооны форматаар өнөөдөр
+        elif is_date_field(f, words):
+            values[label] = date_value(label, fields, words)   # формын бусад огнооны форматаар
         elif is_choice(f):
             picks.append(label)  # эхний боломжит утгыг сонгоно (lookup "..." / combobox / select)
         elif f["type"] == "email" or (is_text(f) and _match(label, email_w)):
@@ -135,7 +167,10 @@ async def wait_opened(env, before: int, tabs_before: list[str], menus: bool = Tr
 
 @step("crud.auto_create")
 async def auto_create(env, args: dict) -> dict:
-    """with: {menu: <цэсний түлхүүр/зам>, save_as: a01_rec, field_as: a01_field}"""
+    """with: {menu: <цэсний түлхүүр/зам>, save_as: a01_rec, field_as: a01_field,
+              try_as: a01_try,      # хадгалахын ӨМНӨ ctx-д бичнэ — Fail болсон ч цэвэрлэгээ хайж устгана
+              values_as: a01_vals,  # бөглөсөн утгууд — засварын дараа дахин нээж шалгахад (crud.auto_verify)
+              prefer: {Ажилтан: "<мастер бичлэгийн утга>"}}   # lookup-д энэ бичлэгийг сонгоно"""
     tag = env.ctx.run_tag
     add, delete = ui.buttons(env, "add"), ui.buttons(env, "delete")
     await ui.ensure_menu(env, args["menu"])
@@ -172,8 +207,10 @@ async def auto_create(env, args: dict) -> dict:
         if not key:
             raise StepBlocked("run_tag бичих текст талбар олдсонгүй", skip_flow=True)
         form_level = await ui.dialog_count(env)
+        words = {**DEFAULT_LABELS, **{k: v for k, v in (ui.fcfg(env).get("auto") or {}).items() if v}}
+        dates = {f["label"] for f in fields if is_date_field(f, words)}
         for label, value in values.items():
-            await ui.fill_field(env, label, value)
+            await ui.fill_field(env, label, value, as_date=label in dates)
             if await ui.dialog_count(env) > form_level:
                 # Текст гэж таньсан талбар бичихэд сонголтын (lookup) цонх нээлээ — хаагаад зогсоно
                 await ui.close_form(env, keep=form_level)
@@ -188,19 +225,27 @@ async def auto_create(env, args: dict) -> dict:
                 picked[label] = current
                 env.run.meta["fields"][label] = f"(автоматаар бөглөгдсөн: {current[:60]})"
                 continue
-            val = await ui.pick_option(env, label)
+            val = await ui.pick_option(env, label, want=str((args.get("prefer") or {}).get(label) or ""))
             if await ui.dialog_count(env) > form_level:
                 await ui.close_form(env, keep=form_level)
             if not val and info.get("readonly"):
                 continue        # идэвхгүй (disabled) сонголт — хадгалах үеийн анхааруулга шийднэ
             if not val:
-                raise StepBlocked(f"'{label}' сонголтын талбарт сонгох утга олдсонгүй (хоосон жагсаалт эсвэл "
-                                  "сонголт тогтсонгүй) — YAML flow бичнэ үү", skip_flow=True)
+                # Ихэвчлэн тест орчинд лавлах (мастер) өгөгдөл алга — AutoCrudStage тохирох мастер цэсээр
+                # бичлэг үүсгээд энэ цэсийг дахин оролдоно
+                env.run.meta["needs"] = label
+                raise StepBlocked(f"'{label}' сонголтын талбарт сонгох утга олдсонгүй (тест орчинд «{label}» "
+                                  "өгөгдөл алга эсвэл сонголт тогтсонгүй) — «" + label + "» мастер цэсийг автомат "
+                                  "CRUD-д сонговол түрүүлж үүсгэнэ; эс бөгөөс YAML flow бичнэ үү",
+                                  skip_flow=True, category="nodata")
             picked[label] = val
             env.run.meta["fields"][label] = f"TODO сонголт (автомат: {val[:60]})"
         env.note("Бөглөсөн: " + ", ".join(f"{l}={v}" for l, v in values.items())
                  + (" | Сонгосон: " + ", ".join(f"{l}={v}" for l, v in picked.items()) if picked else ""))
-        await _save_with_lines(env, form_level)
+        if args.get("try_as"):
+            # Хадгалах оролдлого — «Хадгалах боломжгүй» алдаа гарсан ч бичлэг үүссэн байж болно (цэвэрлэгээ)
+            env.ctx.data[args["try_as"]] = values[key]
+        await _save_with_lines(env, form_level, values, picked)
     except StepFailed as e:
         # Оношлогоо + screenshot — формыг хаахаас ӨМНӨ (юу харагдаж байсныг хадгална)
         env.run.meta["probe"] = await ui.probe(env)
@@ -219,8 +264,11 @@ async def auto_create(env, args: dict) -> dict:
             raise
         if e.findings and all(f.kind == M.WARNING_TOAST for f in e.findings):
             # Систем автоматаар таасан утгыг хүлээж аваагүй (validation) — аппын bug биш
-            raise StepBlocked(f"Автоматаар бөглөсөн утгыг систем хүлээж авсангүй: {e}", e.findings,
-                              skip_flow=True) from None
+            kind = validation_kind(str(e), ui.fcfg(env).get("auto") or {})
+            hint = (" — форм тусгай үйлдэл (мэдээлэл татах / хуваарь г.м.) шаарддаг тул YAML flow бичнэ үү"
+                    if kind == "workflow" else "")
+            raise StepBlocked(f"Автоматаар бөглөсөн утгыг систем хүлээж авсангүй: {e}{hint}", e.findings,
+                              skip_flow=True, category=kind) from None
         if not e.findings and str(e).startswith(("Товч олдсонгүй", "'")):
             # Хадгалах товч / талбар олдоогүй — тохиргоо (selector) зөрсөн, аппын bug биш
             raise StepBlocked(f"Автомат форм: {e}", skip_flow=True) from None
@@ -233,22 +281,31 @@ async def auto_create(env, args: dict) -> dict:
         raise
     if opened == "tab":
         await _close_form_tabs(env, tabs_before)
-    return {args["save_as"]: values[key], args["field_as"]: key}
+    out = {args["save_as"]: values[key], args["field_as"]: key}
+    if args.get("values_as"):
+        out[args["values_as"]] = {"values": dict(values), "picks": dict(picked), "dates": sorted(dates & set(values))}
+    return out
 
 
-async def _save_with_lines(env, form_level: int, max_rounds: int = 8) -> None:
+async def _save_with_lines(env, form_level: int, values: dict | None = None, picked: dict | None = None,
+                           max_rounds: int = 8) -> None:
     """Хадгална. Систем validation анхааруулга буцаавал (аппын алдаа биш) мессежийг уншиж засаад дахин:
 
       1. «<Талбар> оруулна уу / сонгоно уу» → формд тийм талбар байвал бөглөнө/сонгоно
          (тоон шошго эсвэл 0 утгатай бол 1, сонголтын талбар бол эхний утга, бусад нь run_tag)
-      2. талбар биш бол (ж: «Данс оруулна уу», «Барааны мэдээлэл оруулна уу») → мөрийн grid-д мөр нэмнэ
+      2. талбар заагаагүй ерөнхий мессеж (ж: «Хадгалах мэдээлэл дутуу байна») → заавал БИШ хоосон талбаруудыг
+         бөглөнө (текст: run_tag, тоо: 1, огноо, сонголт: эхний утга) — нэг удаа
+      3. талбар биш бол (ж: «Данс оруулна уу», «Барааны мэдээлэл оруулна уу») → мөрийн grid-д мөр нэмнэ
+    values / picked: бөглөсөн утгууд (энд нэмж бөглөснийг ч бичнэ — засварын дараах шалгалтад)
     Алдаа (SQL, 5xx, «Системийн алдаа») гарвал шууд дамжуулна → Fail/bug."""
     save = ui.buttons(env, "save")
     titles = ui.fcfg(env).get("validation_titles") or []
     words = {**DEFAULT_LABELS, **{k: v for k, v in (ui.fcfg(env).get("auto") or {}).items() if v}}
     tag = env.ctx.run_tag
     handled: set[str] = set()
-    tried_lines = False
+    tried_lines = tried_optional = False
+    values = values if values is not None else {}
+    picked = picked if picked is not None else {}
     last: StepFailed | None = None
     for _ in range(max_rounds):
         try:
@@ -272,9 +329,9 @@ async def _save_with_lines(env, form_level: int, max_rounds: int = 8) -> None:
                 continue                                # талбар биш (мөрийн grid г.м.)
             if info["readonly"] and not info.get("combo"):
                 continue
-            if info.get("date"):
-                value = today_str(await ui.scan_form(env, wait_s=0))
-                await ui.fill_field(env, label, value)
+            if is_date_field({**info, "label": label}, words):
+                value = date_value(label, await ui.scan_form(env, wait_s=0), words)
+                await ui.fill_field(env, label, value, as_date=True)
                 shown = value
             elif info["tag"] == "select" or info.get("combo") or info.get("lookup"):
                 value = await ui.pick_option(env, label)
@@ -287,7 +344,11 @@ async def _save_with_lines(env, form_level: int, max_rounds: int = 8) -> None:
             if value:
                 env.run.meta.setdefault("fields", {})[label] = shown
                 env.note(f"Анхааруулгын дагуу бөглөв: {label}={value[:40]}")
+                (picked if shown.startswith("TODO") else values)[label] = value
                 acted = True
+        if not acted and not tried_optional and not ui.validation_targets(message, titles):
+            tried_optional = True
+            acted = await _fill_optional(env, form_level, words, values, picked)
         if not acted and not tried_lines:
             tried_lines = True
             res = await ui.fill_lines(env, "1")
@@ -300,6 +361,47 @@ async def _save_with_lines(env, form_level: int, max_rounds: int = 8) -> None:
         if not acted:
             raise last
     raise last
+
+
+async def _fill_optional(env, form_level: int, words: dict, values: dict, picked: dict) -> bool:
+    """Ерөнхий «мэдээлэл дутуу» анхааруулгад: заавал биш хоосон талбаруудыг бөглөнө. Бөглөсөн бол True."""
+    tag = env.ctx.run_tag
+    filled = []
+    fields = await ui.scan_form(env, wait_s=0)
+    for f in fields:
+        label = f["label"]
+        if f["required"] or label in values or label in picked or (f.get("value") or "").strip():
+            continue
+        if f["readonly"] and not f.get("combo"):
+            continue
+        if f.get("type") in ("checkbox", "radio"):
+            continue
+        try:
+            if is_date_field(f, words):
+                value = date_value(label, fields, words)
+                await ui.fill_field(env, label, value, as_date=True)
+                values[label] = value
+            elif f["tag"] == "select" or f.get("combo") or f.get("lookup"):
+                value = await ui.pick_option(env, label)
+                if not value:
+                    continue
+                picked[label] = value
+            else:
+                value = ("1" if f["type"] == "number" or _match(label, words["number_labels"])
+                         else f"{tag.lower()}@example.com" if f["type"] == "email" or _match(label, words["email_labels"])
+                         else "99000000" if f["type"] == "tel" or _match(label, words["phone_labels"])
+                         else tag)
+                await ui.fill_field(env, label, value)
+                values[label] = value
+        except StepFailed:
+            continue
+        if await ui.dialog_count(env) > form_level:          # текст бичихэд lookup цонх нээгдсэн — хаана
+            await ui.close_form(env, keep=form_level)
+        filled.append(label)
+        env.run.meta.setdefault("fields", {})[label] = f"(заавал биш) {str(value).replace(tag, '{run_tag}')[:60]}"
+    if filled:
+        env.note("«Мэдээлэл дутуу» — заавал биш талбаруудыг бөглөв: " + ", ".join(filled))
+    return bool(filled)
 
 
 async def _close_form_tabs(env, tabs_before: list[str]) -> None:

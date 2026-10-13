@@ -29,7 +29,7 @@ def draft_flows(flows: list[dict]) -> dict:
     out: dict[str, dict] = {}
     for fl in flows:
         meta = fl.get("meta") or {}
-        if not meta.get("auto") or not (meta.get("fields") or meta.get("probe")):
+        if not meta.get("auto") or meta.get("setup") or not (meta.get("fields") or meta.get("probe")):
             continue
         menu = meta.get("menu", "")
         fields = dict(meta.get("fields") or {"TODO талбарын шошго": "{run_tag} ..."})

@@ -281,6 +281,8 @@
     <h2>4. Үр дүн</h2>
     <div id="banner" class="banner"></div>
     <ul class="pipe hidden" id="resPipe" style="margin-top:12px"></ul>
+    <div class="mutwarn hidden" id="resLeft"></div>
+    <div class="muted hidden" id="resSkips" style="margin:8px 0 4px; font-size:13px"></div>
     <div class="kpis" id="resKpis"></div>
     <div class="row" style="margin:14px 0">
       <a class="btn big" id="dlX" href="#">⬇ Test Cases (.xlsx)</a>
@@ -789,6 +791,15 @@ function showResult(s, status, error) {
   $('resPipe').classList.toggle('hidden', !(s.pipeline && s.pipeline.length));
   $('resPipe').innerHTML = (s.pipeline || []).map(p => `<li><div class="row1">${pill(p.status)} <b>${esc(p.name)}</b>
     <span class="msg">${esc(p.message || '')}</span></div></li>`).join('');
+  // Автомат CRUD: устгаж чадаагүй тестийн өгөгдөл, шалгаж чадаагүй шалтгаанууд
+  const left = s.leftovers || [];
+  $('resLeft').classList.toggle('hidden', !left.length);
+  $('resLeft').innerHTML = left.length ? '<b>⚠ Цэвэрлэгдээгүй тестийн өгөгдөл — гараар устгана уу</b><ul style="margin:6px 0 0 18px; padding:0">'
+    + left.map(l => `<li>${esc(l.menu)}: ${esc(l.items.join('; '))}</li>`).join('') + '</ul>' : '';
+  const skips = s.auto_skips || [];
+  $('resSkips').classList.toggle('hidden', !skips.length);
+  $('resSkips').innerHTML = skips.length ? 'Автомат CRUD шалгаж чадаагүй: '
+    + skips.map(g => `<span title="${esc(g.menus.join(', '))}">${esc(g.label)} — <b>${g.count}</b></span>`).join(' · ') : '';
   const st = s.stats, bc = s.bug_counts;
   $('resKpis').innerHTML = [['Pass Rate', st.pass_rate + '%'], ['Нийт TC', st.total], ['Pass', st.pass, 'pass'], ['Fail', st.fail, 'fail'],
     ['Blocked', st.blocked, 'blocked'], ['🔴 Critical', bc.critical], ['🟡 Major', bc.major], ['🟢 Minor', bc.minor]]

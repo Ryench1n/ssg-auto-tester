@@ -145,12 +145,19 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
             label = {"formcheck": "Форм шалгалт", "autocrud": "Автомат CRUD"}.get(kind, kind)
             untested.append(f"{label}: {len(keys)} цэс ажиллаагүй (session тасарсан / зогсоосон) — "
                             "UI-ийн «Үлдсэн цэсүүдийг үргэлжлүүлэх»-ээр дахин ажиллуулна")
-    skipped = [f for f in run.flows if (f.get("meta") or {}).get("skipped")]
+    skipped = [f for f in run.flows if (f.get("meta") or {}).get("skipped") and not (f.get("meta") or {}).get("setup")]
     if skipped:
-        untested.append(f"Автомат CRUD-оор шалгаж чадаагүй {len(skipped)} цэс: "
+        from app.report.build import auto_skip_counts
+        groups = "; ".join(f"{g['label']} — {g['count']}" for g in auto_skip_counts(run.flows))
+        untested.append(f"Автомат CRUD-оор шалгаж чадаагүй {len(skipped)} цэс ({groups}): "
                         + ", ".join(_menu(f).split(" / ")[-1] for f in skipped[:10])
                         + (" …" if len(skipped) > 10 else "")
                         + (f" — YAML ноорог: {run.draft}" if run.draft else ""))
+    left = [f for f in run.flows if (f.get("meta") or {}).get("leftover")]
+    if left:
+        untested.append(f"⚠ Цэвэрлэгдээгүй тестийн өгөгдөл ({len(left)} цэс) — гараар устгана уу: "
+                        + "; ".join(f"{_menu(f).split(' / ')[-1]}: {', '.join(x.split(':')[0] for x in f['meta']['leftover'])}"
+                                    for f in left[:10]))
     if not form_only and not auto_fl and not any(not is_form_flow(f) for f in run.flows):
         untested.append("Өгөгдөл өөрчлөх (CRUD) урсгал — энэ run-д сонгогдоогүй")
     na = [_menu(f).split(" / ")[-1] for f in run.flows
