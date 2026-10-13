@@ -20,6 +20,7 @@ from app.flows.context import FlowContext, StepResult
 from app.flows.engine import FlowConfigError, FlowEngine, host_allowed, host_reason, load_flow
 from app.models import TimelineEvent
 from app.runner.capabilities import crud_candidates, form_candidates, menu_from_key, menu_path
+from app.runner.detectors import snapshot
 from app.runner.runlog import now_iso
 from app.runner.smoke import SmokeRunner
 
@@ -334,7 +335,6 @@ def form_flow_spec(key: str, caps: dict | None = None) -> dict:
 
 
 async def _tabs(pipe: "PipelineRunner") -> list[str]:
-    from app.runner.detectors import snapshot
     st = await snapshot(pipe.page, pipe.cfg) if pipe.page else None
     return st.tab_texts() if st else []
 
@@ -420,7 +420,7 @@ class FormCheckStage(Stage):
             eng = make_engine()
             # Өмнөх цэсийг хаасны дараа апп (.NET runtime) унасан бол энэ цэсийг эвдэрсэн апп дээр шалгахгүй
             if pipe.col is not None and not pipe.halt.is_set():
-                st = await ui.snapshot(pipe.page, pipe.cfg)
+                st = await snapshot(pipe.page, pipe.cfg)
                 if st is not None and st.dead:
                     if prev is not None:
                         await pipe.col.drain()

@@ -336,8 +336,9 @@ def test_form_dialog_with_error_word_in_labels_is_not_error():
 
     async def fake_snapshot(page, cfg):
         return St()
-    orig = ui.snapshot
-    ui.snapshot = fake_snapshot
+    from app.flows.ui import wait as ui_wait
+    orig = ui_wait.snapshot
+    ui_wait.snapshot = fake_snapshot          # popup_problems нь ui.wait модульд
     try:
         errors, _ = aio.run(ui.popup_problems(Env()))
         assert errors == []
@@ -345,7 +346,7 @@ def test_form_dialog_with_error_word_in_labels_is_not_error():
         errors, _ = aio.run(ui.popup_problems(Env()))
         assert len(errors) == 1
     finally:
-        ui.snapshot = orig
+        ui_wait.snapshot = orig
 
 
 @e2e
