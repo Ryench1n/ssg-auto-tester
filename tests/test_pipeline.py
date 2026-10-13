@@ -9,7 +9,6 @@ import sqlite3
 import zipfile
 
 import pytest
-from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
 from app import models as M
@@ -20,6 +19,7 @@ from app.pipeline.runner import PipelineRunner
 from app.report.build import generate_reports
 from app.runner.smoke import RunOptions
 from app.store import Store
+from tests.conftest import login_client
 from tests.fixtures.mock_crud.server import PASSWORD, CrudServer
 from tests.human_login import HumanLogin
 
@@ -219,7 +219,7 @@ def test_session_lost_timeout_blocks_remaining(srv, tmp_path):
 def client(tmp_path, monkeypatch):
     import app.api as api
     monkeypatch.setattr(api, "store", Store(tmp_path / "runs.db"))
-    return TestClient(api.app)
+    return login_client(api, api.store)
 
 
 def test_api_flows_lists_site_flows(client):

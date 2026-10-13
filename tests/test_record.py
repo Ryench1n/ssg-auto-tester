@@ -16,6 +16,8 @@ from app import config as appcfg
 from app import models as M
 from app.flows.recorder import build_flow
 from app.runner import discovery
+from app.store import Store
+from tests.conftest import login_client
 from tests.fixtures.mock_crud.server import CrudServer
 from tests.test_autocrud import CUSTOMERS, e2e, make_pipe
 
@@ -89,9 +91,7 @@ async def _human(pipe):
 
 
 @e2e
-def test_record_save_and_replay(recdir, tmp_path):
-    from fastapi.testclient import TestClient
-
+def test_record_save_and_replay(recdir, tmp_path, monkeypatch):
     import app.api as api
     with CrudServer() as srv:
         events: list = []
@@ -116,7 +116,8 @@ def test_record_save_and_replay(recdir, tmp_path):
         assert srv.state.created == 1 and srv.state.deleted == 1        # хүний үйлдэл
 
         # API-аар хадгална (UI-ийн «💾 Хадгалах»)
-        c = TestClient(api.app)
+        monkeypatch.setattr(api, "store", Store(tmp_path / "runs.db"))
+        c = login_client(api, api.store)
         r = c.post("/api/recorded", json={"url": srv.url, "name": "Харилцагч бүртгэх", "yaml": rec["yaml"]})
         assert r.status_code == 400 and "allowed_hosts" in r.text or r.status_code == 200, r.text
         # 127.0.0.1 нь allowed_hosts-д байдаг

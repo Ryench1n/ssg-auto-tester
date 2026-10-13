@@ -1,10 +1,9 @@
 """runs/ цэвэрлэх бодлого (app/retention.py) ба хувилбарын дугаар давтагдахгүй байх."""
 from datetime import datetime
 
-from fastapi.testclient import TestClient
-
 from app import retention
 from app.store import Store
+from tests.conftest import login_client
 
 NOW = datetime(2026, 10, 13, 12, 0, 0)
 
@@ -74,7 +73,7 @@ def test_next_version_does_not_repeat_after_delete(tmp_path):
 def test_delete_recorded_rejects_non_test_host(tmp_path, monkeypatch):
     import app.api as api
     monkeypatch.setattr(api, "store", Store(tmp_path / "runs.db"))
-    c = TestClient(api.app)
+    c = login_client(api, api.store)
     r = c.delete("/api/recorded", params={"url": "https://hr.smartapp.mn/", "name": "rec: x"})
     assert r.status_code == 400
     assert c.delete("/api/recorded", params={"url": "", "name": "rec: x"}).status_code == 400

@@ -14,6 +14,21 @@ from app.report.verify import soffice_bin  # noqa: E402
 HAS_SOFFICE = bool(soffice_bin())
 needs_soffice = pytest.mark.skipif(not HAS_SOFFICE, reason="LibreOffice суугаагүй")
 
+TEST_PASSWORD = "test-password-1"
+
+
+def login_client(api, store, username: str = "tester", is_admin: bool = False):
+    """api.store-д хэрэглэгч үүсгээд нэвтэрсэн TestClient буцаана (бүх API нэвтрэлт шаарддаг)."""
+    from fastapi.testclient import TestClient
+
+    from app import auth
+    if not store.get_user(username):
+        store.create_user(username, auth.hash_password(TEST_PASSWORD, iterations=1000), "", is_admin)
+    c = TestClient(api.app)
+    r = c.post("/api/auth/login", json={"username": username, "password": TEST_PASSWORD})
+    assert r.status_code == 200, r.text
+    return c
+
 
 def make_run(n: int = 20, fails: dict | None = None) -> RunData:
     """Синтетик run: n цэс; fails = {index: [Finding, ...]}."""

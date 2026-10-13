@@ -12,6 +12,9 @@ from app.config import RUNS_DIR
 
 _lock = threading.Lock()
 
+# Хэрэглэгчийн нэвтрэлт нэмэгдэхээс өмнөх (эзэмшигчгүй) run-ууд энэ хэрэглэгчид оноогдоно
+LEGACY_OWNER = "admin"
+
 
 class Store:
     def __init__(self, path: Path = RUNS_DIR / "runs.db"):
@@ -35,6 +38,16 @@ class Store:
             cols = {r[1] for r in c.execute("PRAGMA table_info(runs)")}
             if "pipeline" not in cols:
                 c.execute("ALTER TABLE runs ADD COLUMN pipeline TEXT")
+            # Migration: run бүр нэг хэрэглэгчийнх (Түүх тусдаа) — хуучин run-ууд LEGACY_OWNER-т
+            if "owner" not in cols:
+                c.execute("ALTER TABLE runs ADD COLUMN owner TEXT")
+            c.execute("UPDATE runs SET owner=? WHERE owner IS NULL OR owner=''", (LEGACY_OWNER,))
+            c.execute("""CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY, name TEXT, pw_hash TEXT NOT NULL, is_admin INTEGER DEFAULT 0,
+                disabled INTEGER DEFAULT 0, created_at TEXT, last_login TEXT)""")
+            # Зөвхөн token-ы hash хадгална — DB алдагдсан ч session хулгайлагдахгүй
+            c.execute("""CREATE TABLE IF NOT EXISTS sessions (
+                token_hash TEXT PRIMARY KEY, username TEXT, created_at TEXT, expires_at TEXT)""")
             # Цэсний үйлдлийн каталог (smoke-ийн READ-ONLY scan) — host бүрийн цэсийн сүүлийн бүртгэл
             c.execute("""CREATE TABLE IF NOT EXISTS menu_caps (
                 host TEXT, key TEXT, module TEXT, folder TEXT, name TEXT, crud TEXT, caps_json TEXT,
@@ -63,12 +76,12 @@ class Store:
         return out
 
     def create(self, run_id: str, url: str, host: str, project: str, qa_lead: str, version_label: str,
-               pipeline: list | None = None) -> None:
+               pipeline: list | None = None, owner: str = LEGACY_OWNER) -> None:
         with _lock, self._conn() as c:
             c.execute("INSERT INTO runs (id, created_at, url, host, project, qa_lead, version_label, status,"
-                      " pipeline) VALUES (?,?,?,?,?,?,?,?,?)",
+                      " pipeline, owner) VALUES (?,?,?,?,?,?,?,?,?,?)",
                       (run_id, datetime.now().isoformat(timespec="seconds"), url, host, project, qa_lead,
-                       version_label, "running", json.dumps(pipeline or [], ensure_ascii=False)))
+                       version_label, "running", json.dumps(pipeline or [], ensure_ascii=False), owner))
 
     def update(self, run_id: str, **fields) -> None:
         if "summary" in fields:
@@ -84,9 +97,13 @@ class Store:
             row = c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
         return self._row(row) if row else None
 
-    def list(self, limit: int = 100) -> list[dict]:
+    def list(self, limit: int = 100, owner: str | None = None) -> list[dict]:
+        """owner өгвөл зөвхөн тэр хэрэглэгчийн run-ууд (None = бүгд: admin, дотоод ашиглалт)."""
+        q, args = "SELECT * FROM runs", []
+        if owner is not None:
+            q, args = q + " WHERE owner=?", [owner]
         with self._conn() as c:
-            rows = c.execute("SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            rows = c.execute(q + " ORDER BY created_at DESC LIMIT ?", (*args, limit)).fetchall()
         return [self._row(r, with_summary=False) for r in rows]
 
     def delete(self, run_id: str) -> bool:
@@ -101,6 +118,51 @@ class Store:
             rows = c.execute("SELECT version_label FROM runs WHERE project=?", (project,)).fetchall()
         nums = [int(m.group(1)) for (v,) in rows if (m := re.fullmatch(r"v1\.(\d+)", v or ""))]
         return f"v1.{max(len(rows), max(nums) + 1 if nums else 0)}"
+
+    # ---------------------------------------------------------------- хэрэглэгч, session
+    def create_user(self, username: str, pw_hash: str, name: str = "", is_admin: bool = False) -> None:
+        with _lock, self._conn() as c:
+            c.execute("INSERT INTO users (username, name, pw_hash, is_admin, disabled, created_at) VALUES (?,?,?,?,0,?)",
+                      (username, name, pw_hash, int(is_admin), datetime.now().isoformat(timespec="seconds")))
+
+    def get_user(self, username: str) -> dict | None:
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        return dict(row) if row else None
+
+    def list_users(self) -> list[dict]:
+        with self._conn() as c:
+            rows = c.execute("SELECT username, name, is_admin, disabled, created_at, last_login FROM users"
+                             " ORDER BY is_admin DESC, username").fetchall()
+        return [dict(r) for r in rows]
+
+    def update_user(self, username: str, **fields) -> bool:
+        cols = ", ".join(f"{k}=?" for k in fields)
+        with _lock, self._conn() as c:
+            cur = c.execute(f"UPDATE users SET {cols} WHERE username=?", (*fields.values(), username))
+        return cur.rowcount > 0
+
+    def add_session(self, token_hash: str, username: str, expires_at: str) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        with _lock, self._conn() as c:
+            c.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+            c.execute("INSERT INTO sessions VALUES (?,?,?,?)", (token_hash, username, now, expires_at))
+            c.execute("UPDATE users SET last_login=? WHERE username=?", (now, username))
+
+    def session_user(self, token_hash: str) -> dict | None:
+        """Хүчинтэй session-ий идэвхтэй хэрэглэгч (хугацаа дууссан, идэвхгүй хэрэглэгч → None)."""
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._conn() as c:
+            row = c.execute("SELECT u.username, u.name, u.is_admin FROM sessions s JOIN users u ON u.username=s.username"
+                            " WHERE s.token_hash=? AND s.expires_at > ? AND u.disabled=0", (token_hash, now)).fetchone()
+        return dict(row) if row else None
+
+    def delete_sessions(self, token_hash: str | None = None, username: str | None = None) -> None:
+        with _lock, self._conn() as c:
+            if token_hash:
+                c.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash,))
+            if username:
+                c.execute("DELETE FROM sessions WHERE username=?", (username,))
 
     @staticmethod
     def _row(row: sqlite3.Row, with_summary: bool = True) -> dict:

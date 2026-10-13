@@ -22,6 +22,7 @@ from app.report.build import generate_reports
 from app.runner.capabilities import classify
 from app.runner.smoke import RunOptions
 from app.store import Store
+from tests.conftest import login_client
 from tests.fixtures.mock_crud.server import PASSWORD, CrudServer
 from tests.human_login import HumanLogin
 
@@ -137,15 +138,13 @@ def test_store_caps_catalog(tmp_path):
 
 
 def test_api_menus_catalog_and_crud_select(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-
     import app.api as api
     monkeypatch.setattr(api, "store", Store(tmp_path / "runs.db"))
     api.store.save_caps("testaccounting.smartapp.mn", "r1", "v26", [
         {"key": CUSTOMERS, "module": "Мастер дата", "folder": "Бүртгэл", "name": "Харилцагч",
          "caps": {"crud": "full", "edit": True, "buttons": [{"text": "Нэмэх"}, {"text": "Устгах"}], "columns": ["Нэр"]}},
         {"key": ITEMS, "module": "Мастер дата", "folder": "Бүртгэл", "name": "Бараа", "caps": {"crud": "none"}}])
-    c = TestClient(api.app)
+    c = login_client(api, api.store)
     r = c.get("/api/menus", params={"url": "https://testaccounting.smartapp.mn/"}).json()
     assert r["allowed"] and [m["key"] for m in r["menus"]] == [CUSTOMERS]
     m = r["menus"][0]

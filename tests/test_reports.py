@@ -215,7 +215,7 @@ def test_previous_summary_prefers_largest_overlap(monkeypatch):
     part = {"flows": [{"flow": f"form: М / {i}"} for i in range(3)]}
 
     class FakeStore:
-        def list(self, n):
+        def list(self, n, owner=None):
             return [{"id": "part", "host": "testhr.smartapp.mn", "status": "done"},
                     {"id": "full", "host": "testhr.smartapp.mn", "status": "done"}]
 

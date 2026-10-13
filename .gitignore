@@ -13,3 +13,4 @@ templates/report_tpl.docx
 
 # Локал Claude Code тохиргоо
 .claude/settings.local.json
+initial-passwords.txt

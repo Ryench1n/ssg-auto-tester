@@ -14,13 +14,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import yaml
 
+from app import auth
 from app import config as appcfg
 from app import retention
 from app.config import RUNS_DIR, load_config
@@ -47,6 +48,116 @@ class LiveRun:
 
 
 LIVE: dict[str, LiveRun] = {}
+
+
+# ---------------------------------------------------------------- нэвтрэлт (энэ системийн хэрэглэгч)
+PUBLIC_PATHS = {"/login", "/api/auth/login", "/favicon.svg", "/favicon.ico"}
+throttle = auth.Throttle()
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    """/login-оос бусад бүх хуудас, API, файл татахад нэвтэрсэн байх ёстой."""
+    path = request.url.path
+    if path in PUBLIC_PATHS:
+        return await call_next(request)
+    token = request.cookies.get(auth.COOKIE)
+    user = store.session_user(auth.token_hash(token)) if token else None
+    if not user:
+        if path.startswith(("/api/", "/runs/")):
+            return JSONResponse({"detail": "Нэвтрэх шаардлагатай"}, status_code=401)
+        return RedirectResponse("/login", status_code=303)
+    request.state.user = user
+    return await call_next(request)
+
+
+def current_user(request: Request) -> dict:
+    return request.state.user
+
+
+def _own(run_id: str, user: dict) -> dict:
+    """Run-ыг зөвхөн эзэмшигч (эсвэл admin) хандана. Бусдынх бол «олдсонгүй» — байгаа эсэхийг ч задлахгүй."""
+    r = store.get(run_id)
+    if not r or not (user["is_admin"] or r.get("owner") == user["username"]):
+        raise HTTPException(404)
+    return r
+
+
+def _own_live(run_id: str, user: dict, detail: str | None = None) -> LiveRun:
+    _own(run_id, user)
+    live = LIVE.get(run_id)
+    if not live:
+        raise HTTPException(404, detail)
+    return live
+
+
+def _set_session(resp: JSONResponse, username: str) -> JSONResponse:
+    token = auth.new_token()
+    store.add_session(auth.token_hash(token), username, auth.expires_at())
+    resp.set_cookie(auth.COOKIE, token, max_age=auth.SESSION_HOURS * 3600, httponly=True, samesite="strict", path="/")
+    return resp
+
+
+class LoginReq(BaseModel):
+    username: str
+    password: str
+
+
+class PasswordReq(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    token = request.cookies.get(auth.COOKIE)
+    if token and store.session_user(auth.token_hash(token)):
+        return RedirectResponse("/", status_code=303)
+    return HTMLResponse((STATIC / "login.html").read_text(encoding="utf-8"), headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/auth/login")
+async def login(req: LoginReq):
+    username = req.username.strip().lower()
+    wait = throttle.blocked(username)
+    if wait:
+        raise HTTPException(429, f"Олон удаа буруу оролдлоо — {wait} секундийн дараа дахин оролдоно уу")
+    user = store.get_user(username)
+    if not await asyncio.to_thread(auth.check_login, user, req.password):
+        throttle.fail(username)
+        raise HTTPException(401, "Нэвтрэх нэр эсвэл нууц үг буруу")
+    throttle.reset(username)
+    return _set_session(JSONResponse({"username": username, "name": user.get("name") or "",
+                                      "is_admin": bool(user["is_admin"])}), username)
+
+
+@app.post("/api/auth/logout")
+async def logout(request: Request):
+    token = request.cookies.get(auth.COOKIE)
+    if token:
+        store.delete_sessions(token_hash=auth.token_hash(token))
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.COOKIE, path="/")
+    return resp
+
+
+@app.get("/api/auth/me")
+async def me(user: dict = Depends(current_user)):
+    return {"username": user["username"], "name": user.get("name") or "", "is_admin": bool(user["is_admin"])}
+
+
+@app.post("/api/auth/password")
+async def change_password(req: PasswordReq, user: dict = Depends(current_user)):
+    full = store.get_user(user["username"])
+    if not await asyncio.to_thread(auth.check_login, full, req.old_password):
+        raise HTTPException(400, "Одоогийн нууц үг буруу")
+    problem = auth.password_problem(req.new_password)
+    if problem:
+        raise HTTPException(400, problem)
+    store.update_user(user["username"], pw_hash=auth.hash_password(req.new_password))
+    # Бусад төхөөрөмж дээрх session-уудыг хаагаад энэ хөтөчид шинэ session өгнө
+    store.delete_sessions(username=user["username"])
+    return _set_session(JSONResponse({"ok": True}), user["username"])
 
 
 class StepReq(BaseModel):
@@ -150,12 +261,14 @@ def _recover_sync() -> None:
 
 def _previous_summary(run_id: str, url: str, flows: list | None = None) -> dict | None:
     """Ижил систем (host) дээрх өмнөх дууссан run-ы summary (форм шалгалтын харьцуулалтад) — одоогийн run-тай
-    ижил цэс (форм урсгал) давхцсан хамгийн сүүлийнх (давхцалгүй run-тай харьцуулах утгагүй)."""
+    ижил цэс (форм урсгал) давхцсан хамгийн сүүлийнх (давхцалгүй run-тай харьцуулах утгагүй). Зөвхөн тухайн
+    run-ын эзэмшигчийн түүхээс (хэрэглэгч бүрийн Түүх тусдаа)."""
     host = urlparse(url).hostname or ""
+    owner = (store.get(run_id) or {}).get("owner")
     mine = {f["flow"] for f in flows or [] if str(f.get("flow", "")).startswith("form: ")}
     best, best_n, smoke_load = None, 0, None
     seen = 0
-    for r in store.list(200):
+    for r in store.list(200, owner=owner):
         if r["id"] == run_id or r.get("host") != host or r.get("status") not in ("done", "cancelled"):
             continue
         seen += 1
@@ -250,7 +363,7 @@ def _auto_prune(cfg: dict, log: Path) -> None:
 
 
 @app.post("/api/runs")
-async def start_run(req: StartReq):
+async def start_run(req: StartReq, user: dict = Depends(current_user)):
     url = normalize_url(req.url)
     if not url:
         raise HTTPException(400, "URL заавал")
@@ -285,7 +398,8 @@ async def start_run(req: StartReq):
     live = LiveRun(runner)
     ref["live"] = live
     LIVE[run_id] = live
-    store.create(run_id, url, urlparse(url).hostname or "", project, opts.qa_lead, version, runner.data.pipeline)
+    store.create(run_id, url, urlparse(url).hostname or "", project, opts.qa_lead, version, runner.data.pipeline,
+                 owner=user["username"])
     live.task = asyncio.create_task(_run_job(run_id, live, cfg))
     return {"id": run_id, "project": project, "version": version, "warning": url_warning(url),
             "run_tag": runner.data.run_tag, "pipeline": runner.data.pipeline}
@@ -314,31 +428,25 @@ async def list_flows(url: str):
 
 
 @app.post("/api/runs/{run_id}/select")
-async def select(run_id: str, req: SelectReq):
-    live = LIVE.get(run_id)
-    if not live:
-        raise HTTPException(404)
+async def select(run_id: str, req: SelectReq, user: dict = Depends(current_user)):
+    live = _own_live(run_id, user)
     live.runner.select_modules(req.modules)
     return {"ok": True}
 
 
 @app.post("/api/runs/{run_id}/crud-select")
-async def crud_select(run_id: str, req: CrudSelectReq):
+async def crud_select(run_id: str, req: CrudSelectReq, user: dict = Depends(current_user)):
     """Smoke-ийн дараа автомат CRUD хийх цэсүүд (хоосон → алгасна). Зөвхөн нэр дэвшигчдийг хүлээн авна."""
-    live = LIVE.get(run_id)
-    if not live:
-        raise HTTPException(404)
+    live = _own_live(run_id, user)
     if not live.runner.select_crud(req.menus):
         raise HTTPException(409, "Автомат CRUD-ийн сонголт хүлээгдээгүй байна")
     return {"ok": True}
 
 
 @app.post("/api/runs/{run_id}/form-select")
-async def form_select(run_id: str, req: CrudSelectReq):
+async def form_select(run_id: str, req: CrudSelectReq, user: dict = Depends(current_user)):
     """Smoke-ийн дараа форм шалгалт хийх цэсүүд (хоосон → алгасна)."""
-    live = LIVE.get(run_id)
-    if not live:
-        raise HTTPException(404)
+    live = _own_live(run_id, user)
     if not live.runner.select_forms(req.menus):
         raise HTTPException(409, "Форм шалгалтын сонголт хүлээгдээгүй байна")
     return {"ok": True}
@@ -356,11 +464,11 @@ class ChromeReq(BaseModel):
     url: str
 
 
-def previous_form_na(url: str, exclude: str = "") -> dict:
+def previous_form_na(url: str, exclude: str = "", owner: str | None = None) -> dict:
     """Ижил систем дээрх хамгийн сүүлийн форм шалгалтад засварын форм нь «тест орчинд өгөгдөлгүй» (N/A) байсан
-    цэсүүд — баг тест өгөгдөл оруулсны дараа зөвхөн тэдгээрийг дахин шалгахад."""
+    цэсүүд — баг тест өгөгдөл оруулсны дараа зөвхөн тэдгээрийг дахин шалгахад. owner: тухайн хэрэглэгчийн түүхээс."""
     host = urlparse(url).hostname or ""
-    for r in store.list(200):
+    for r in store.list(200, owner=owner):
         if r["id"] == exclude or r.get("host") != host or r.get("status") not in ("done", "cancelled"):
             continue
         raw = RUNS_DIR / r["id"] / "raw.json"
@@ -378,8 +486,8 @@ def previous_form_na(url: str, exclude: str = "") -> dict:
 
 
 @app.get("/api/form-na")
-async def form_na(url: str, exclude: str = ""):
-    return await asyncio.to_thread(previous_form_na, url, exclude)
+async def form_na(url: str, exclude: str = "", user: dict = Depends(current_user)):
+    return await asyncio.to_thread(previous_form_na, url, exclude, user["username"])
 
 
 @app.get("/api/chrome")
@@ -410,10 +518,8 @@ async def chrome_start(req: ChromeReq):
 
 
 @app.post("/api/runs/{run_id}/record-stop")
-async def record_stop(run_id: str):
-    live = LIVE.get(run_id)
-    if not live:
-        raise HTTPException(404)
+async def record_stop(run_id: str, user: dict = Depends(current_user)):
+    live = _own_live(run_id, user)
     if not live.runner.stop_recording():
         raise HTTPException(409, "Бичлэг явагдаагүй байна")
     return {"ok": True}
@@ -498,19 +604,15 @@ async def list_menus(url: str, crud: str | None = "full"):
 
 
 @app.post("/api/runs/{run_id}/stop")
-async def stop(run_id: str):
-    live = LIVE.get(run_id)
-    if not live:
-        raise HTTPException(404)
+async def stop(run_id: str, user: dict = Depends(current_user)):
+    live = _own_live(run_id, user)
     live.runner.cancel()
     return {"ok": True}
 
 
 @app.get("/api/runs/{run_id}/events")
-async def events(run_id: str, request: Request, since: int = 0):
-    live = LIVE.get(run_id)
-    if not live:
-        raise HTTPException(404, "Идэвхтэй run алга")
+async def events(run_id: str, request: Request, since: int = 0, user: dict = Depends(current_user)):
+    live = _own_live(run_id, user, "Идэвхтэй run алга")
 
     async def gen():
         idx = since
@@ -537,25 +639,22 @@ async def events(run_id: str, request: Request, since: int = 0):
 
 
 @app.get("/api/runs")
-async def list_runs():
-    return store.list()
+async def list_runs(user: dict = Depends(current_user)):
+    """Хэрэглэгч бүр зөвхөн өөрийн Түүхийг харна; admin бүгдийг (owner баганатай)."""
+    return store.list(owner=None if user["is_admin"] else user["username"])
 
 
 @app.get("/api/runs/{run_id}")
-async def get_run(run_id: str):
-    r = store.get(run_id)
-    if not r:
-        raise HTTPException(404)
+async def get_run(run_id: str, user: dict = Depends(current_user)):
+    r = _own(run_id, user)
     live = LIVE.get(run_id)
     r["live"] = bool(live and not live.done)
     return r
 
 
 @app.delete("/api/runs/{run_id}")
-async def delete_run(run_id: str):
-    r = store.get(run_id)
-    if not r:
-        raise HTTPException(404)
+async def delete_run(run_id: str, user: dict = Depends(current_user)):
+    _own(run_id, user)
     live = LIVE.get(run_id)
     if live and not live.done:
         raise HTTPException(409, "Идэвхтэй ажиллаж байгаа run-ыг устгах боломжгүй — эхлээд зогсооно уу")
@@ -566,9 +665,9 @@ async def delete_run(run_id: str):
 
 
 @app.get("/api/compare")
-async def compare(a: str, b: str):
+async def compare(a: str, b: str, user: dict = Depends(current_user)):
     """Regression харьцуулалт: bug signature-аар шинэ / засагдсан / хэвээр."""
-    ra, rb = store.get(a), store.get(b)
+    ra, rb = _own(a, user), _own(b, user)
     if not ra or not rb or not ra.get("summary") or not rb.get("summary"):
         raise HTTPException(404, "Хоёр run-ын тайлан хэрэгтэй")
     ba = {x["signature"]: x for x in ra["summary"]["bugs"]}
@@ -582,10 +681,8 @@ async def compare(a: str, b: str):
     }
 
 
-def _file(run_id: str, kind: str) -> tuple[Path, str]:
-    r = store.get(run_id)
-    if not r:
-        raise HTTPException(404)
+def _file(run_id: str, kind: str, user: dict) -> tuple[Path, str]:
+    r = _own(run_id, user)
     d = RUNS_DIR / run_id
     s = r.get("summary") or {}
     if kind == "xlsx" and s.get("xlsx"):
@@ -609,8 +706,8 @@ def _file(run_id: str, kind: str) -> tuple[Path, str]:
 
 
 @app.get("/runs/{run_id}/download/{kind}")
-async def download(run_id: str, kind: str):
-    path, name = _file(run_id, kind)
+async def download(run_id: str, kind: str, user: dict = Depends(current_user)):
+    path, name = _file(run_id, kind, user)
     if not path.exists():
         raise HTTPException(404, "Файл олдсонгүй")
     ascii_name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
@@ -619,9 +716,10 @@ async def download(run_id: str, kind: str):
 
 
 @app.get("/runs/{run_id}/shots/{name}")
-async def shot(run_id: str, name: str):
+async def shot(run_id: str, name: str, user: dict = Depends(current_user)):
     if not re.fullmatch(r"[\w.-]+\.png", name):
         raise HTTPException(400)
+    _own(run_id, user)
     p = RUNS_DIR / run_id / "shots" / name
     if not p.exists():
         raise HTTPException(404)

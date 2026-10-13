@@ -80,13 +80,40 @@
   .pipe ol { margin:6px 0 0 18px; padding:0; font-size:12px; }
   .pipe ol li { padding:2px 0; }
   .pill.running { background:var(--brand); } .pill.pending { background:#94a3b8; }
+  /* Нэвтэрсэн хэрэглэгч */
+  header h1 { white-space:nowrap; }
+  header > span { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  nav, .who { flex:none; } nav button, .who b, .who button { white-space:nowrap; }
+  .who { display:flex; align-items:center; gap:6px; margin-left:10px; padding-left:12px; border-left:1px solid rgba(255,255,255,.3); }
+  .who b { font-size:13px; } .who .tag { font-size:11px; background:rgba(255,255,255,.2); padding:1px 7px; border-radius:9px; }
+  .who button { background:transparent; border:0; color:#fff; opacity:.85; cursor:pointer; font:inherit; font-size:12px; text-decoration:underline; padding:4px; }
+  .who button:hover { opacity:1; }
+  dialog { border:1px solid var(--line); border-radius:10px; padding:20px 22px; width:min(360px, calc(100vw - 32px)); }
+  dialog::backdrop { background:rgba(15,23,42,.45); }
+  dialog h2 { font-size:15px; margin:0 0 10px; color:var(--brand); }
+  dialog label { margin-top:10px; }
+  @media (max-width: 760px) { header { flex-wrap:wrap; } header > span { display:none; } nav { margin-left:0; } }
 </style>
 </head>
 <body>
 <header>
   <h1>SSG Auto Tester</h1><span>Smart Software Group · тест орчны автомат тест (нэвтрэх → smoke → форм шалгалт → CRUD → бичсэн урсгал)</span>
   <nav><button id="navRun" class="on">Шинэ тест</button><button id="navHist">Түүх</button></nav>
+  <div class="who" id="who"><b id="whoName"></b><span class="tag hidden" id="whoAdmin">admin</span>
+    <button id="btnPw" type="button">Нууц үг солих</button><button id="btnLogout" type="button">Гарах</button></div>
 </header>
+<dialog id="pwDlg">
+  <form id="pwForm">
+    <h2>Нууц үг солих</h2>
+    <label for="pwOld">Одоогийн нууц үг</label><input type="password" id="pwOld" autocomplete="current-password" required>
+    <label for="pwNew">Шинэ нууц үг (8+ тэмдэгт)</label><input type="password" id="pwNew" autocomplete="new-password" minlength="8" required>
+    <label for="pwNew2">Шинэ нууц үг дахин</label><input type="password" id="pwNew2" autocomplete="new-password" minlength="8" required>
+    <div class="warn" id="pwMsg"></div>
+    <div class="row" style="margin-top:14px; justify-content:flex-end">
+      <button class="btn ghost" type="button" id="pwCancel">Болих</button><button class="btn" type="submit">Хадгалах</button>
+    </div>
+  </form>
+</dialog>
 <main>
 <section id="pageRun">
   <!-- 1. Эхлүүлэх -->
@@ -283,9 +310,11 @@
 
 <section id="pageHist" class="hidden">
   <div class="card">
-    <h2>Өмнөх run-ууд</h2>
+    <h2 id="histTitle">Миний run-ууд</h2>
     <div class="muted">Хоёр run сонгоод харьцуулна (regression: шинэ / засагдсан bug).</div>
-    <div class="tbl" style="margin-top:10px"><table><thead><tr><th></th><th>Огноо</th><th>Төсөл</th><th>URL</th><th>Хувилбар</th><th>Pass Rate</th><th>Шийдвэр</th><th>Статус</th><th>Файл</th><th></th></tr></thead><tbody id="histRows"></tbody></table></div>
+    <div class="row hidden" id="histOwnerBox" style="margin-top:10px"><label for="histOwner" style="margin:0">Хэрэглэгч</label>
+      <select id="histOwner" style="width:auto"><option value="">Бүгд</option></select></div>
+    <div class="tbl" style="margin-top:10px"><table><thead><tr><th></th><th class="ownerCol hidden">Хэрэглэгч</th><th>Огноо</th><th>Төсөл</th><th>URL</th><th>Хувилбар</th><th>Pass Rate</th><th>Шийдвэр</th><th>Статус</th><th>Файл</th><th></th></tr></thead><tbody id="histRows"></tbody></table></div>
     <button class="btn" id="btnCmp" style="margin-top:10px">Сонгосон 2 run-ыг харьцуулах</button>
     <div id="cmp" style="margin-top:14px"></div>
   </div>
@@ -296,6 +325,38 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let runId = null, es = null, lastIdx = 0, discovered = [], loginTimer = null;
+
+// ---- Нэвтрэлт: session дууссан (401) бол нэвтрэх хуудас руу ----
+const _fetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const r = await _fetch(...args);
+  if (r.status === 401 && !String(args[0]).startsWith('/api/auth/')) location.replace('/login');
+  return r;
+};
+let ME = {username: '', name: '', is_admin: false};
+const peopleKey = () => 'ssg_people:' + ME.username;   // нэг хөтчийг хэд хэдэн хэрэглэгч хэрэглэж болно
+async function loadMe() {
+  const r = await fetch('/api/auth/me');
+  if (!r.ok) return;
+  ME = await r.json();
+  $('whoName').textContent = ME.name ? `${ME.name} (${ME.username})` : ME.username;
+  $('whoAdmin').classList.toggle('hidden', !ME.is_admin);
+  $('histTitle').textContent = ME.is_admin ? 'Бүх хэрэглэгчийн run-ууд' : 'Миний run-ууд';
+  try { const p = JSON.parse(localStorage.getItem(peopleKey()) || '{}');
+        if (p.tester && !$('tester').value) $('tester').value = p.tester;
+        if (p.qa_lead && !$('qa_lead').value) $('qa_lead').value = p.qa_lead; } catch (e) {}
+}
+$('btnLogout').onclick = async () => { await fetch('/api/auth/logout', {method: 'POST'}); location.replace('/login'); };
+$('btnPw').onclick = () => { $('pwForm').reset(); $('pwMsg').textContent = ''; $('pwDlg').showModal(); };
+$('pwCancel').onclick = () => $('pwDlg').close();
+$('pwForm').onsubmit = async (ev) => {
+  ev.preventDefault();
+  if ($('pwNew').value !== $('pwNew2').value) { $('pwMsg').textContent = 'Шинэ нууц үг таарахгүй байна'; return; }
+  const r = await fetch('/api/auth/password', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({old_password: $('pwOld').value, new_password: $('pwNew').value})});
+  if (!r.ok) { $('pwMsg').textContent = (await r.json().catch(() => ({}))).detail || 'Сольж чадсангүй'; return; }
+  $('pwDlg').close(); alert('Нууц үг солигдлоо. Бусад төхөөрөмж дээрх нэвтрэлт хаагдсан.');
+};
 const STATES = {starting:'эхэлж байна', login:'нэвтрэлт хүлээж байна',
   discovery:'цэс илрүүлж байна', awaiting_selection:'модуль сонголт хүлээж байна',
   running:'цэсүүдийг шалгаж байна', confirming:'давтан баталгаажуулж байна', reporting:'тайлан үүсгэж байна',
@@ -384,8 +445,7 @@ $('btnChrome').onclick = async () => {
 };
 $('useCdp').onchange = () => { if ($('useCdp').checked) chromeStatus(); };
 // Тест гүйцэтгэгч / QA Lead-ийг дараагийн удаа дахин бичихгүй (хувилбар run бүрт өөр тул санахгүй)
-try { const p = JSON.parse(localStorage.getItem('ssg_people') || '{}');
-      if (p.tester) $('tester').value = p.tester; if (p.qa_lead) $('qa_lead').value = p.qa_lead; } catch (e) {}
+loadMe();     // нэвтэрсэн хэрэглэгч + түүний хадгалсан «Тест гүйцэтгэгч / QA Lead»
 let recUrl = '';
 $('btnRecStart').onclick = async () => {
   const name = $('recName').value.trim();
@@ -599,7 +659,7 @@ async function startRun(steps, url) {
     $('startMsg').textContent = 'Тестлэх хувилбар болон тест гүйцэтгэгчийн нэрийг оруулна уу.';
     (!version ? $('version') : $('tester')).focus(); return;
   }
-  try { localStorage.setItem('ssg_people', JSON.stringify({tester, qa_lead: $('qa_lead').value.trim()})); } catch (e) {}
+  try { localStorage.setItem(peopleKey(), JSON.stringify({tester, qa_lead: $('qa_lead').value.trim()})); } catch (e) {}
   const body = { url: url || $('url').value.trim() || runUrl, project: $('project').value.trim(), qa_lead: $('qa_lead').value.trim(),
     version, tester,
     wait_ms: +$('wait_ms').value || 3000, check_risky: $('check_risky').checked,
@@ -765,14 +825,29 @@ function renderTcs() {
 }
 for (const id of ['fRes','fMod']) $(id).onchange = renderTcs; $('fTxt').oninput = renderTcs;
 
+let HIST = [];
 async function loadHistory() {
-  const rows = await (await fetch('/api/runs')).json();
-  $('histRows').innerHTML = rows.map(r => `<tr><td><input type="checkbox" class="hsel" value="${r.id}"></td><td>${esc((r.created_at||'').replace('T',' '))}</td>
+  HIST = await (await fetch('/api/runs')).json();
+  // admin: бүх хэрэглэгчийн түүх — «Хэрэглэгч» багана + шүүлт
+  for (const el of document.querySelectorAll('.ownerCol')) el.classList.toggle('hidden', !ME.is_admin);
+  $('histOwnerBox').classList.toggle('hidden', !ME.is_admin);
+  if (ME.is_admin) {
+    const cur = $('histOwner').value, owners = [...new Set(HIST.map(r => r.owner || ''))].sort();
+    $('histOwner').innerHTML = '<option value="">Бүгд</option>' + owners.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('');
+    $('histOwner').value = owners.includes(cur) ? cur : '';
+  }
+  renderHistory();
+}
+$('histOwner').onchange = () => renderHistory();
+function renderHistory() {
+  const who = ME.is_admin ? $('histOwner').value : '';
+  const rows = HIST.filter(r => !who || r.owner === who);
+  $('histRows').innerHTML = rows.map(r => `<tr><td><input type="checkbox" class="hsel" value="${r.id}"></td>${ME.is_admin ? `<td>${esc(r.owner)}</td>` : ''}<td>${esc((r.created_at||'').replace('T',' '))}</td>
     <td>${esc(r.project)} ${esc(r.version_label)}</td><td>${esc(r.url)}</td><td>${esc(r.app_version || '—')}</td><td>${r.pass_rate ?? '—'}${r.pass_rate != null ? '%' : ''}</td>
     <td>${r.decision ? (r.decision === 'GO' ? '✅ GO' : r.decision === 'INCOMPLETE' ? '⏸ Хэсэгчилсэн' : '❌ NO-GO') : '—'}</td><td>${esc(r.status)}</td>
     <td>${r.status === 'done' || r.status === 'cancelled' ? `<a href="/runs/${r.id}/download/xlsx">xlsx</a> · <a href="/runs/${r.id}/download/docx">docx</a> · <a href="#" onclick="openRun('${r.id}');return false">харах</a>` : ''}</td>
     <td><a href="#" class="warn" onclick="deleteRun('${r.id}');return false">Устгах</a></td></tr>`).join('')
-    || '<tr><td colspan="10" class="muted">Run алга</td></tr>';
+    || `<tr><td colspan="${ME.is_admin ? 11 : 10}" class="muted">Run алга</td></tr>`;
 }
 async function openRun(id) { const r = await (await fetch('/api/runs/' + id)).json(); runId = id; show('pageRun'); showResult(r.summary, r.status, r.error); }
 async function deleteRun(id) {

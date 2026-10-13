@@ -455,7 +455,7 @@ def test_previous_form_na(tmp_path, monkeypatch):
     (run_dir / "raw.json").write_text(json.dumps({"flows": flows}), encoding="utf-8")
 
     class FakeStore:
-        def list(self, n):
+        def list(self, n, owner=None):
             return [{"id": "now", "host": "testhr.smartapp.mn", "status": "running"},
                     {"id": "r1", "host": "testhr.smartapp.mn", "status": "done"}]
 

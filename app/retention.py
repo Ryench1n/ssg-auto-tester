@@ -4,7 +4,7 @@ python -m app.retention [--keep N] [--days D] [--orphans] [--apply]
 
 Анхдагчаар зөвхөн юу устгагдахыг харуулна (dry-run); `--apply` өгвөл устгана. Утга өгөөгүй бол
 config/default.yaml → `retention`-оос авна. Дүрэм:
-  * төсөл бүрийн хамгийн сүүлийн `keep_per_project` run-ыг үлдээнэ (0 = хязгааргүй);
+  * хэрэглэгч × төсөл бүрийн хамгийн сүүлийн `keep_per_project` run-ыг үлдээнэ (0 = хязгааргүй);
   * `max_age_days`-ээс хуучин run-ыг устгана (0 = хязгааргүй);
   * төсөл бүрийн ХАМГИЙН СҮҮЛИЙН run-ыг хэзээ ч устгахгүй (дараагийн run-ын харьцуулалт, хувилбарын дугаар);
   * «running» төлөвтэй run-ыг хэзээ ч устгахгүй.
@@ -34,9 +34,10 @@ def select_prunable(runs: list[dict], keep_per_project: int = 0, max_age_days: i
     if keep_per_project <= 0 and max_age_days <= 0:
         return []
     cutoff = (now or datetime.now()) - timedelta(days=max_age_days) if max_age_days > 0 else None
-    by_project: dict[str, list[dict]] = {}
+    # Хэрэглэгч бүрийн Түүх тусдаа — нэг хэрэглэгчийн шинэ run бусдын run-ыг шахахгүй
+    by_project: dict[tuple[str, str], list[dict]] = {}
     for r in sorted(runs, key=lambda r: r.get("created_at") or "", reverse=True):
-        by_project.setdefault(r.get("project") or "", []).append(r)
+        by_project.setdefault((r.get("owner") or "", r.get("project") or ""), []).append(r)
     out = []
     for rows in by_project.values():
         for i, r in enumerate(rows):
