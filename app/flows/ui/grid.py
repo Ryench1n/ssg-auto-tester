@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 from app.flows.context import StepFailed
 from app.models import Finding
 from app.flows.ui._js import FIND_ROWS_JS, MARK_SEARCH_JS, _COMMON_JS
-from app.flows.ui.base import sel_payload
+from app.flows.ui.base import buttons, sel_payload
 from app.flows.ui.wait import popup_problems, raise_on_problems, settle
-from app.flows.ui.page import dialog_count, tab_names
+from app.flows.ui.page import click_button, dialog_count, tab_names
 
 if TYPE_CHECKING:
     from app.flows.engine import FlowEngine
@@ -41,7 +41,23 @@ async def grid_find_settled(env: "FlowEngine", text: str, expect: str = "found",
             return rows
         if i < tries - 1:
             await asyncio.sleep(wait_s)
+            if i == 0:
+                # SmartApp-ын баримтын жагсаалт («Шүүлтийн нөхцөл»-тэй) хадгалсны дараа өөрөө шинэчлэгддэггүй —
+                # «Шүүх»/«Сэргээх» дарж байж шинэ бичлэг харагдана (Accounting 2026-10-14: «Амжилттай хадгаллаа»
+                # гарсан ч хайлтаар олдоогүй)
+                await reload_list(env)
     return rows
+
+
+async def reload_list(env: "FlowEngine") -> bool:
+    """Жагсаалтыг дахин ачаална: «Шүүх» / «Сэргээх» (flow.buttons.filter). Дарсан бол True."""
+    try:
+        await click_button(env, buttons(env, "filter") or ["Шүүх", "Сэргээх"], scope="page", wait_s=1.0)
+    except StepFailed:
+        return False
+    await asyncio.sleep(0.3)
+    await settle(env)
+    return True
 
 
 # Мөрийг сонгох аюулгүй цэг: сонголтын checkbox, эс бөгөөс бичлэг НЭЭДЭГ сум/холбоосгүй нүд

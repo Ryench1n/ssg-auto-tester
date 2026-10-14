@@ -23,6 +23,8 @@ SCHED = key_of("Мастер дата", "Бүртгэл", "Давтамж", "/md
 EBAR = key_of("Мастер дата", "Бүртгэл", "И-баримт", "/md/ebar")
 CITY = key_of("Мастер дата", "Бүртгэл", "Хот", "/md/city")
 SLOW = key_of("Мастер дата", "Бүртгэл", "Удаан жагсаалт", "/md/slow")
+MANUAL = key_of("Мастер дата", "Бүртгэл", "Шүүлттэй жагсаалт", "/md/manual")
+GHOST = key_of("Мастер дата", "Бүртгэл", "Үл харагдах жагсаалт", "/md/ghost")
 
 
 def f(label, **kw):
@@ -94,7 +96,7 @@ def deps_run(tmp_path_factory):
     rd = tmp_path_factory.mktemp("deps")
     with CrudServer() as srv:
         srv.state.deps = True
-        pipe, cfg = make_pipe(srv, rd, [{"kind": "autocrud", "menus": [LEAVE, EMP, NOTE, PROJ, LOCK, SCHED, EBAR, CITY, SLOW]}], [])
+        pipe, cfg = make_pipe(srv, rd, [{"kind": "autocrud", "menus": [LEAVE, EMP, NOTE, PROJ, LOCK, SCHED, EBAR, CITY, SLOW, MANUAL, GHOST]}], [])
         data = asyncio.run(pipe.run())
     summary = generate_reports(data, cfg, rd, verify=False)
     by = {}
@@ -159,7 +161,8 @@ def test_undeletable_leftover_is_reported(deps_run):
     st = {s["index"]: s for s in lock["steps"]}
     assert st[7]["status"] == M.BLOCKED and "гараар устгана уу" in st[7]["message"], steps_of(lock)
     left = deps_run["summary"]["leftovers"]
-    assert [x["menu"] for x in left] == ["Мастер дата / Бүртгэл / Түгжээ"] and "{run_tag}" in left[0]["items"][0]
+    lock_left = [x for x in left if x["menu"] == "Мастер дата / Бүртгэл / Түгжээ"]
+    assert lock_left and "{run_tag}" in lock_left[0]["items"][0]
     from docx import Document
     text = "\n".join(p.text for p in Document(str(deps_run["dir"] / deps_run["summary"]["docx"])).paragraphs)
     tables = "\n".join(c.text for t in Document(str(deps_run["dir"] / deps_run["summary"]["docx"])).tables
@@ -233,3 +236,74 @@ def test_validation_target_phrasings():
     assert validation_targets("Анхааруулга\nУлс сонгогдоогүй байна!", t) == ["Улс"]
     assert validation_targets("Анхаар\nЗөвшөөрөх эсвэл цуцлах хүний тоо 0 байж болохгүй!", t) == \
         ["Зөвшөөрөх эсвэл цуцлах хүний тоо"]
+
+
+
+# ---------------------------------------------------------------- Accounting 2026-10-14 run-ын худал Fail
+@e2e
+def test_list_needing_filter_click_is_refreshed(deps_run):
+    """Баримтын жагсаалт хадгалсны дараа өөрөө шинэчлэгддэггүй — «Шүүх» дарж дахин хайна (A13)."""
+    m = deps_run["by"][MANUAL]
+    assert m["status"] == M.PASS, steps_of(m)
+
+
+@e2e
+def test_saved_but_invisible_record_is_not_reported_clean(deps_run):
+    """Хадгалсан бичлэг жагсаалтаас олдохгүй бол цэвэрлэгээ «үлдээгүй» гэж худал хэлэхгүй — гараар шалгуулна."""
+    g = deps_run["by"][GHOST]
+    st = {s["index"]: s for s in g["steps"]}
+    assert st[1]["status"] == M.PASS and st[2]["status"] == M.FAIL
+    assert st[7]["status"] == M.BLOCKED and "гараар шалгана уу" in st[7]["message"], steps_of(g)
+    assert any(x["menu"].endswith("Үл харагдах жагсаалт") for x in deps_run["summary"]["leftovers"])
+
+
+def test_key_prefers_column_shown_in_list():
+    """Түлхүүр талбар жагсаалтад баганатай байх ёстой (A22: «Гүйлгээний утга» баганагүй)."""
+    fields = [f("Гүйлгээний утга", required=True), f("Баримтын №", required=True)]
+    _, key, _, _ = plan_values(fields, "T", {})
+    assert key == "Гүйлгээний утга"
+    _, key, _, _ = plan_values(fields, "T", {}, columns=["№", "Огноо", "Баримтын №"])
+    assert key == "Баримтын №"
+
+
+def test_item_level_lists_are_not_autocrud_candidates():
+    from types import SimpleNamespace as NS
+    from app.models import MenuItem
+    from app.runner.capabilities import crud_candidates
+    mk = lambda name, cols: NS(item=MenuItem("Систем", "Маягт", name, "/x/" + name), tab_opened=True, status="Pass",
+                               caps={"crud": "full", "columns": cols, "buttons": []})
+    names = [c["name"] for c in crud_candidates([
+        mk("Шаардах хуудасны жагсаалт", ["№", "Огноо", "Гүйлгээний утга"]),
+        mk("Шаардах хуудасны жагсаалт /бараагаар/", ["№", "Барааны код", "Барааны нэр"])])]
+    assert names == ["Шаардах хуудасны жагсаалт"]
+
+
+def test_validation_titled_dialog_with_error_word_is_warning():
+    """«Анхаар — Нөхцөл алдаатай байна!» — хэрэглэгчийн утгын validation (A60), системийн алдаа биш."""
+    import asyncio as aio
+    from app.config import load_config
+    from app.flows.ui import wait as ui_wait
+
+    class St:
+        dialogs = ["Анхаар\nНөхцөл алдаатай байна!"]
+        toasts: list = []
+        loading = False
+
+    class Env:
+        cfg = load_config("http://x/")
+        page = None
+
+    async def snap(page, cfg):
+        return St()
+    orig = ui_wait.snapshot
+    ui_wait.snapshot = snap
+    try:
+        errors, warnings = aio.run(ui_wait.popup_problems(Env()))
+        assert errors == [] and warnings
+        St.dialogs = ["Анхаар\nData is Null. This method cannot be called on Null values."]
+        errors, _ = aio.run(ui_wait.popup_problems(Env()))
+        assert errors                                         # «Null» — системийн алдаа хэвээр
+        St.dialogs = ["Анхааруулга\nSSG1: Устгахдаа итгэлтэй байна уу?"]
+        assert aio.run(ui_wait.popup_problems(Env())) == ([], [])     # асуулт
+    finally:
+        ui_wait.snapshot = orig

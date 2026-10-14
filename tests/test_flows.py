@@ -193,3 +193,21 @@ def test_tool_error_is_blocked_not_app_bug(srv, tmp_path):
     st = fl["steps"][1]
     assert st["status"] == M.BLOCKED and st["category"] == "tool", st
     assert "Хэрэгслийн дотоод алдаа" in st["message"] and fl["status"] == M.BLOCKED
+
+
+
+@e2e
+def test_playwright_locator_timeout_is_tool_error(srv, tmp_path):
+    """Accounting A123 «Улс»: `TimeoutError: Locator.press: Timeout 30000ms` — хэрэгслийн харилцааны алдаа, bug биш."""
+    from app.flows.engine import step
+
+    class TimeoutError(Exception):          # playwright._impl._errors.TimeoutError-тэй ижил нэр
+        pass
+
+    @step("test.locator_timeout")
+    async def boom(env, args):
+        raise TimeoutError('Locator.press: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator("[data-ssg-field=\'1\']")')
+
+    _, fl = run_flow(srv, tmp_path, [{"uses": "test.locator_timeout"}], name="lt")
+    st = fl["steps"][0]
+    assert st["status"] == M.BLOCKED and st["category"] == "tool", st

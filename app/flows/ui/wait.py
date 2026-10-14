@@ -73,6 +73,13 @@ async def popup_problems(env: "FlowEngine") -> tuple[list[Finding], list[str]]:
     def is_error_dialog(text: str) -> bool:
         lines = [ln for ln in text.strip().split("\n") if ln.strip()]
         if len(text) <= 200 and len(lines) <= 4:
+            # «Анхаар — Нөхцөл алдаатай байна!» — validation гарчигтай цонх нь хэрэглэгчийн оруулсан утгын
+            # анхааруулга («алдаатай» үгтэй ч): SQL / exception агуулаагүй бол системийн алдаа биш
+            first = lines[0].strip().lower() if lines else ""
+            det = env.cfg.get("detect") or {}
+            if any(first.startswith(t) for t in titles):
+                return (any(p.lower() in text.lower() for p in det.get("sql_error") or [])
+                        or any(w in text for w in ("Exception", "Null", "алдаа гарлаа")))
             return _is_error_text(env, text)          # богино мессеж цонх
         # Форм цонх (олон мөр/урт): шошго/багананд «Томьёо алдаатай», «error» мэт үг байж болно (ж: HR «Цалин бодох
         # загвар» — шошгоноос болж худал Fail болдог байсан) — зөвхөн гарчиг нь системийн алдаа, эсвэл SQL / exception

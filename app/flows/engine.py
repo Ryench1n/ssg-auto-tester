@@ -369,7 +369,7 @@ class FlowEngine:
                 res.status, res.message = M.BLOCKED, "Хөтөч хаагдсан — алхам ажиллаж чадсангүй"
                 if self.cancel_event is not None:
                     self.cancel_event.set()
-            elif type(e).__name__ == "TimeoutError" and "Page." in str(e):
+            elif type(e).__name__ == "TimeoutError" and ("Page." in str(e) or "Locator." in str(e)):
                 # Playwright: элемент дарагдсангүй / хүлээлт хэтэрсэн — аппын алдаа биш, шалгаж чадаагүй
                 res.status, res.category = M.BLOCKED, "tool"
                 res.message = self.sanitize(f"Элементтэй харилцаж чадсангүй: {str(e).splitlines()[0]}")[:500]

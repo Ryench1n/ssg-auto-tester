@@ -86,8 +86,8 @@ def today_str(fields: list[dict], d: datetime.date | None = None) -> str:
     return d.isoformat()
 
 
-def plan_values(fields: list[dict], tag: str, auto_cfg: dict,
-                uid: str = "") -> tuple[dict[str, str], str, list[str], list[str]]:
+def plan_values(fields: list[dict], tag: str, auto_cfg: dict, uid: str = "",
+                columns: list[str] | None = None) -> tuple[dict[str, str], str, list[str], list[str]]:
     """(бичих утгууд {шошго: утга}, түлхүүр талбар, СОНГОХ заавал талбарууд (select/combobox/lookup),
     бөглөж чадахгүй заавал талбарууд (огноо, checkbox …)).
 
@@ -113,8 +113,17 @@ def plan_values(fields: list[dict], tag: str, auto_cfg: dict,
     # DevExpress ComboBox (гараар бичих боломжгүй) input нь readonly — гэхдээ жагсаалтаас сонгож болно
     empty = [f for f in fields if (not f["readonly"] or f.get("combo")) and is_empty(f)]
     texts = [f for f in empty if is_text(f) and not is_date_field(f, words)]
-    # Түлхүүр: заавал (*) нэр/утга төрлийн → аль ч нэр/утга → заавал текст → код → эхний текст
-    key_f = (next((f for f in texts if f["required"] and _match(f["label"], key_w)), None)
+    # Жагсаалтын хайлт зөвхөн харагдах багана дээр ажилладаг — түлхүүр нь жагсаалтад баганатай талбар байх ёстой
+    # (Accounting «Бараа материалын хүлээн авалтын акт»: «Гүйлгээний утга» баганагүй → хайлтаар олдоогүй)
+    cols = {re.sub(r"\s+", " ", c).strip().lower() for c in columns or []}
+    # тоо/дүн (ж: журналын «Дүн» нь баганатай ч мөрийг давтагдашгүй тодорхойлохгүй) түлхүүр болохгүй
+    shown = [f for f in texts if f["label"].strip().lower() in cols and not _match(f["label"], num_w)]
+    # Түлхүүр: (жагсаалтад харагдах) заавал нэр/утга → нэр/утга → заавал текст → код → эхний текст
+    key_f = (next((f for f in shown if f["required"] and _match(f["label"], key_w)), None)
+             or next((f for f in shown if _match(f["label"], key_w)), None)
+             or next((f for f in shown if f["required"]), None)
+             or (shown[0] if shown else None)
+             or next((f for f in texts if f["required"] and _match(f["label"], key_w)), None)
              or next((f for f in texts if _match(f["label"], key_w)), None)
              or next((f for f in texts if f["required"] and not _match(f["label"], code_w)), None)
              or next((f for f in texts if _match(f["label"], code_w)), None)
@@ -198,7 +207,7 @@ async def auto_create(env, args: dict) -> dict:
             raise StepBlocked(f"Форм нээгдсэн ({'цонх' if opened == 'dialog' else 'шинэ таб: ' + ', '.join(new_tabs)}) "
                               "боловч талбарын шошго илэрсэнгүй — оношлогоог тайлангаас харна уу", skip_flow=True)
         values, key, picks, unresolved = plan_values(fields, tag, ui.fcfg(env).get("auto") or {},
-                                                     _uid(args))
+                                                     _uid(args), args.get("columns"))
         meta_fields = {l: v.replace(tag, "{run_tag}") for l, v in values.items()}
         env.run.meta.update(fields={**meta_fields, **{l: "TODO" for l in picks + unresolved}}, key=key)
         if unresolved:

@@ -206,5 +206,6 @@ async def crud_delete(env, args: dict) -> dict:
             await ui.close_form(env)
             raise StepFailed(f"Устгахад: {errors[0].text} (тестийн өгөгдөл «{find}» үлдсэн)", errors)
         raise StepFailed(f"Устгасны дараа '{find}' мөр хэвээр байна: {rows[0]}")
+    env.ctx.data.setdefault("_deleted", set()).add(find)
     env.note(f"Устгав: {find}")
     return {}

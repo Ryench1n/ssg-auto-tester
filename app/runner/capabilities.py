@@ -132,6 +132,9 @@ def crud_candidates(results) -> list[dict]:
     out = []
     for r in results:
         c = r.caps or {}
+        cols = {str(x).lower() for x in c.get("columns") or []}
+        if "бараагаар" in r.item.name.lower() and {"барааны код", "барааны нэр"} & cols:
+            continue      # мөрийн (бараагаар) жагсаалт — ижил баримтын толгойн жагсаалт тусдаа цэс
         if c.get("crud") == "full" and r.tab_opened:
             out.append({"key": r.item.key, "module": r.item.module, "folder": r.item.folder,
                         "name": r.item.name, "path": menu_path(r.item), "status": r.status,

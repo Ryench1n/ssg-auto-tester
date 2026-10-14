@@ -971,6 +971,10 @@ const MINI_DEFS = {
          validate: (v) => !v.name ? 'Нэр оруулна уу' : (!v.country || /Бүх/.test(v.country)) ? 'Улс сонгогдоогүй байна!' : ''},
   // «Удаан жагсаалт»: хадгалсан/устгасан бичлэг жагсаалтад 1.2 сек хоцорч тусна (grid дахин ачаалал)
   slow: {cols: ['Нэр'], fields: [{label: 'Нэр *', name: 'name'}], validate: (v) => !v.name ? 'Нэр оруулна уу' : '', delay: 1200},
+  // «Шүүлттэй жагсаалт»: SmartApp-ын баримтын жагсаалт шиг — хадгалсан бичлэг «Шүүх» дарж байж харагдана
+  manual: {cols: ['Нэр'], fields: [{label: 'Нэр *', name: 'name'}], validate: (v) => !v.name ? 'Нэр оруулна уу' : '', manual: true},
+  // «Үл харагдах жагсаалт»: хадгалсан бичлэг жагсаалтад хэзээ ч гарахгүй (мөрийн түвшний жагсаалт г.м.)
+  ghost: {cols: ['Нэр'], fields: [{label: 'Нэр *', name: 'name'}], validate: (v) => !v.name ? 'Нэр оруулна уу' : '', ghost: true},
 };
 /* E2E: «Борлуулалт» — Дугаар (БР0001…) систем үүсгэнэ, Төлөв: Ноорог → «Батлах» (1201 Дт / 5101 Кт бичигдэнэ) →
  * «Цуцлах» (буцаалт). Батлагдсан баримтыг засах/устгахгүй. «Гүйлгээ баланс» — бодит эхний үлдэгдэл + зөвхөн
@@ -1052,6 +1056,11 @@ function miniView(kind) {
   const inp = bar.querySelector('input');
   inp.onkeydown = (e) => { if (e.key === 'Enter') { st.q = inp.value; render(); } };
   v.appendChild(bar);
+  if (d.manual) {
+    const f = $(`<button class="dxbl-btn flt">Шүүх</button>`);
+    f.onclick = () => { st.rows.forEach(r => { r.fresh = false; }); render(); };
+    bar.insertBefore(f, bar.firstChild);
+  }
   for (const [name, fn] of Object.entries(d.actions || {})) {
     const b = $(`<button class="dxbl-btn act">${name}</button>`);
     b.onclick = () => {
@@ -1067,7 +1076,7 @@ function miniView(kind) {
   const t = $(`<table class="dxbl-grid"><thead><tr>${d.cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody></tbody></table>`);
   const vals = (r) => d.extraCols ? [r.number || '', ...d.fields.map(f => r[f.name] || ''), r.status || 'Ноорог']
                                   : d.fields.map(f => r[f.name] || '');
-  for (const r of st.rows.filter(r => !r.hidden).filter(r => !st.q || vals(r).join(' ').toLowerCase().includes(st.q.toLowerCase()))) {
+  for (const r of st.rows.filter(r => !r.hidden && !r.fresh && !d.ghost).filter(r => !st.q || vals(r).join(' ').toLowerCase().includes(st.q.toLowerCase()))) {
     const tr = $(`<table><tr role="row" class="${r.id === st.sel ? 'dxbl-grid-selected-row dxbl-grid-focused-row' : ''}">
       ${vals(r).map(x => `<td>${esc(x) || '&nbsp;'}</td>`).join('')}</tr></table>`).querySelector('tr');
     tr.onclick = () => { st.sel = r.id; render(); };
@@ -1100,7 +1109,7 @@ function miniForm(kind, rec) {
     if (err) { toast(err); return; }
     if (rec) { if (d.onUpdate) d.onUpdate(rec, v); Object.assign(rec, v); }
     else {
-      const row = {id: ++st.seq, ...v, hidden: !!d.delay};
+      const row = {id: ++st.seq, ...v, hidden: !!d.delay, fresh: !!d.manual};
       if (d.onCreate) d.onCreate(row);
       st.rows.push(row);
       if (d.delay) setTimeout(() => { row.hidden = false; render(); }, d.delay);

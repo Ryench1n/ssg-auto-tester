@@ -238,7 +238,7 @@ class CrudStage(Stage):
 
 
 # ------------------------------------------------------------------- autocrud
-def auto_flow_spec(key: str, prefix: str, prefer: dict | None = None) -> dict:
+def auto_flow_spec(key: str, prefix: str, prefer: dict | None = None, columns: list[str] | None = None) -> dict:
     """Цэс бүрт үүсгэх автомат CRUD урсгал. Өгөгдлийн түлхүүр урсгал бүрт өөр (prefix) —
     нэг FlowContext хуваалцдаг тул өмнөх цэсийн бичлэгт хүрэхээс сэргийлнэ.
     prefer: {lookup шошго: мастер бичлэгийн утга} — тест орчинд хоосон lookup-д автоматаар үүсгэсэн бичлэг."""
@@ -246,6 +246,8 @@ def auto_flow_spec(key: str, prefix: str, prefer: dict | None = None) -> dict:
     create = {"menu": key, "save_as": rec, "field_as": fld, "try_as": f"{prefix}_try", "values_as": f"{prefix}_vals"}
     if prefer:
         create["prefer"] = dict(prefer)
+    if columns:
+        create["columns"] = list(columns)
     return {"steps": [
         {"uses": "crud.auto_create", "name": "Автомат бүртгэл (форм илрүүлж бөглөх)", "with": create},
         # menu: форм шинэ таб дээр нээгддэг сайтад алхам бүр жагсаалтын таб руу буцна (идэвхтэй бол юу ч хийхгүй)
@@ -265,6 +267,11 @@ def auto_flow_spec(key: str, prefix: str, prefer: dict | None = None) -> dict:
         {"uses": "crud.auto_empty_save", "name": "Хоосон форм хадгалахад анхааруулга гарах (сөрөг тест)",
          "always": True, "with": {"menu": key}},
     ]}
+
+
+def _columns(pipe: "PipelineRunner", key: str) -> list[str] | None:
+    """Smoke-ийн бүртгэсэн жагсаалтын баганууд (каталогоос сонгосон бол None)."""
+    return next(((r.caps or {}).get("columns") for r in pipe.data.results or [] if r.item.key == key), None)
 
 
 def master_setup_spec(key: str, prefix: str) -> dict:
@@ -346,7 +353,7 @@ class AutoCrudStage(Stage):
             if pipe.halt.is_set():
                 break
             code = pipe.next_auto_code()
-            run = await self._flow(pipe, key, code, auto_flow_spec(key, code.lower()))
+            run = await self._flow(pipe, key, code, auto_flow_spec(key, code.lower(), columns=_columns(pipe, key)))
             runs.append(run)
         runs = await self._retry_with_masters(pipe, keys, runs)
         tested = [r for r in runs if not r.meta.get("skipped")]
@@ -432,7 +439,8 @@ class AutoCrudStage(Stage):
                     at = next(i for i, f in enumerate(pipe.data.flows)
                               if f.get("code") == r.code and f.get("flow") == r.flow)
                     again = await self._flow(pipe, r.meta["menu_key"], r.code,
-                                             auto_flow_spec(r.meta["menu_key"], r.code.lower(), {label: value}),
+                                             auto_flow_spec(r.meta["menu_key"], r.code.lower(), {label: value},
+                                                            _columns(pipe, r.meta["menu_key"])),
                                              meta={"master": {"label": label, "menu": mpath}}, replace_at=at)
                     out[out.index(r)] = again
             await self._flow(pipe, mkey, mcode, master_teardown_spec(mkey, mp), f"master-cleanup: {mpath}",

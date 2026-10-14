@@ -125,8 +125,15 @@ async def auto_cleanup(env, args: dict) -> dict:
     await ui.clear_toasts(env)
     await ui.ensure_menu(env, args.get("menu"))
     cleaned, left = [], []
+    saved = env.ctx.data.get(f"{p}_rec")           # бүртгэх алхам Pass — бичлэг хадгалагдсан нь тодорхой
+    deleted = env.ctx.data.get("_deleted") or set()
     for text in texts:
-        if not await ui.grid_find(env, text):
+        if not await ui.grid_find_settled(env, text, tries=2):
+            if saved and text not in deleted and text == saved:
+                # Хадгалсан ч жагсаалтаас олдохгүй (шүүлтүүр, мөрийн түвшний жагсаалт, баганагүй талбар) —
+                # «үлдээгүй» гэж худал хэлэхгүй
+                left.append(f"{text.replace(tag, '{run_tag}')}: хадгалсан ч жагсаалтаас олдсонгүй — "
+                            "устгагдсан эсэхийг гараар шалгана уу")
             continue
         try:
             await crud_delete(env, {"menu": args.get("menu"), "find": text})
