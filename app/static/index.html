@@ -344,6 +344,8 @@ async function loadMe() {
   $('whoName').textContent = ME.name ? `${ME.name} (${ME.username})` : ME.username;
   $('whoAdmin').classList.toggle('hidden', !ME.is_admin);
   $('histTitle').textContent = ME.is_admin ? 'Бүх хэрэглэгчийн run-ууд' : 'Миний run-ууд';
+  if (ME.stale) $('startMsg').textContent = '⚠ Системийн код шинэчлэгдсэн — серверийг дахин асаана уу (python -m app). '
+                                           + 'Дахин асаахаас өмнө тест эхлүүлэх боломжгүй.';
   try { const p = JSON.parse(localStorage.getItem(peopleKey()) || '{}');
         if (p.tester && !$('tester').value) $('tester').value = p.tester;
         if (p.qa_lead && !$('qa_lead').value) $('qa_lead').value = p.qa_lead; } catch (e) {}

@@ -176,3 +176,20 @@ def test_manual_login_timeout_blocks_all_steps(srv, tmp_path):
     assert data.pipeline[0]["status"] == M.BLOCKED and data.pipeline[1]["status"] == M.BLOCKED
     assert statuses(flow) == [M.BLOCKED, M.BLOCKED]
     assert all("Нэвтрэлт амжилтгүй" in s["message"] for s in flow["steps"])
+
+
+@e2e
+def test_tool_error_is_blocked_not_app_bug(srv, tmp_path):
+    """Хэрэгслийн кодын алдаа (TypeError г.м.) аппын bug болохгүй — Blocked «tool». 2026-10-13 HR run-д хуучин
+    сервер + шинэ кодын холилдлоос 103 урсгал TypeError-оор Fail болж худал bug үүсгэсэн."""
+    from app.flows.engine import step
+
+    @step("test.tool_boom")
+    async def boom(env, args):
+        raise TypeError("fill_field() got an unexpected keyword argument 'as_date'")
+
+    _, fl = run_flow(srv, tmp_path, [{"uses": "crud.open", "with": {"menu": MENU}},
+                                     {"uses": "test.tool_boom"}], name="boom")
+    st = fl["steps"][1]
+    assert st["status"] == M.BLOCKED and st["category"] == "tool", st
+    assert "Хэрэгслийн дотоод алдаа" in st["message"] and fl["status"] == M.BLOCKED

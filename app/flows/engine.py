@@ -20,6 +20,7 @@ import asyncio
 import fnmatch
 import re
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -66,6 +67,11 @@ def step(name: str, needs_session: bool = True):
         STEPS[name] = StepDef(fn, needs_session)
         return fn
     return deco
+
+
+# Алхмын кодын (хэрэгслийн) алдааг илтгэх Python exception — аппын төлөвөөс үүсэхгүй
+TOOL_ERRORS = (TypeError, AttributeError, NameError, KeyError, IndexError, ImportError, AssertionError,
+               UnboundLocalError)
 
 
 class FlowConfigError(ValueError):
@@ -342,6 +348,14 @@ class FlowEngine:
                 res.message = self.sanitize(f"Элементтэй харилцаж чадсангүй: {str(e).splitlines()[0]}")[:500]
             else:
                 res.status, res.message = M.FAIL, self.sanitize(f"{type(e).__name__}: {e}")[:500]
+            if isinstance(e, TOOL_ERRORS):
+                # Хэрэгслийн (Python кодын) дотоод алдаа — аппын bug БИШ: Blocked «tool»; автомат урсгал бол
+                # «шалгаж чадаагүй» (TC/bug үүсгэхгүй). 2026-10-13 HR: хуучин сервер + шинэ код → 103 худал bug.
+                res.status, res.category = M.BLOCKED, "tool"
+                res.message = self.sanitize(f"Хэрэгслийн дотоод алдаа (аппын bug биш): {type(e).__name__}: {e}")[:500]
+                self.log(f"[{self.flow_name}] хэрэгслийн алдаа:\n{traceback.format_exc()[-1500:]}", "error")
+                if self.run.meta.get("auto"):
+                    self.run.meta["skipped"] = res.message
         res.role = self.role
         res.duration_ms = int((time.monotonic() - t0) * 1000)
         # Алхмын явц дахь сүлжээ/консолын ноцтой алдаа — UI дээр амжилттай мэт харагдсан ч Fail

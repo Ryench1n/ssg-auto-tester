@@ -181,3 +181,13 @@ def test_users_init_creates_15_once(tmp_path):
         users.add_user(s, "Bad Name!")
     new = users.reset_password(s, "qa05")
     assert auth.verify_password(new, s.get_user("qa05")["pw_hash"])
+
+
+def test_stale_server_refuses_to_start_runs(api, monkeypatch):
+    """Код шинэчлэгдсэн ч сервер дахин асаагдаагүй бол run эхлүүлэхгүй (хуучин/шинэ код холилдож худал bug үүснэ)."""
+    c = login_client(api, api.store, "qa06")
+    assert c.get("/api/auth/me").json()["stale"] is False
+    monkeypatch.setattr(api, "CODE_STAMP", 0.0)
+    assert c.get("/api/auth/me").json()["stale"] is True
+    r = c.post("/api/runs", json={"url": "https://testaccounting.smartapp.mn/"})
+    assert r.status_code == 409 and "дахин асаа" in r.json()["detail"]

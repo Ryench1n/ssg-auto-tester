@@ -23,6 +23,18 @@ def load_run(raw_path: Path) -> M.RunData:
         r["findings"] = [_mk(M.Finding, f) for f in r.get("findings") or []]
         results.append(_mk(M.ItemResult, r))
     timeline = [_mk(M.TimelineEvent, t) for t in d.get("timeline") or []]
+    # Хуучин raw.json: хэрэгслийн (Python) дотоод алдааг Fail (аппын bug) гэж бүртгэсэн байж болно → Blocked «tool»
+    from app.flows.engine import TOOL_ERRORS
+    tool_re = "^(" + "|".join(e.__name__ for e in TOOL_ERRORS) + "): "
+    import re as _re
+    for f in d.get("flows") or []:
+        for s in f.get("steps") or []:
+            if s.get("status") == M.FAIL and _re.match(tool_re, s.get("message") or ""):
+                s["status"], s["category"] = M.BLOCKED, "tool"
+                s["message"] = f"Хэрэгслийн дотоод алдаа (аппын bug биш): {s['message']}"
+                if (f.get("meta") or {}).get("auto"):
+                    f["meta"]["skipped"] = s["message"]
+                f["status"] = _flow_status(f["steps"])
     # Хуучин (ангилалгүй) raw.json: форм шалгалтын Blocked-ийн ангиллыг мессежээс нөхнө
     for f in d.get("flows") or []:
         if not (f.get("meta") or {}).get("formcheck"):

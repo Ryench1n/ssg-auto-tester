@@ -25,6 +25,7 @@ from app import auth
 from app import config as appcfg
 from app import retention
 from app.config import RUNS_DIR, load_config
+from app.flows import steps as _steps  # noqa: F401  — бүх алхмыг сервер асахад ачаална (код холилдохгүй)
 from app.flows.engine import FlowConfigError, flow_code, flow_description, host_reason, load_flow
 from app.pipeline.runner import PipelineRunner
 from app.runner import browser as browser_mod
@@ -34,6 +35,18 @@ from app.runner.smoke import RunOptions
 from app.store import Store
 
 STATIC = Path(__file__).parent / "static"
+
+
+def code_stamp() -> float:
+    """app/ доорх Python кодын хамгийн сүүлд өөрчлөгдсөн хугацаа — сервер асахаас хойш өөрчлөгдсөн эсэхийг мэдэх."""
+    return max((p.stat().st_mtime for p in Path(__file__).parent.rglob("*.py")), default=0.0)
+
+
+CODE_STAMP = code_stamp()
+
+
+def code_stale() -> bool:
+    return code_stamp() > CODE_STAMP + 1
 app = FastAPI(title="SSG Auto Tester")
 store = Store()
 
@@ -143,7 +156,8 @@ async def logout(request: Request):
 
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(current_user)):
-    return {"username": user["username"], "name": user.get("name") or "", "is_admin": bool(user["is_admin"])}
+    return {"username": user["username"], "name": user.get("name") or "", "is_admin": bool(user["is_admin"]),
+            "stale": code_stale()}
 
 
 @app.post("/api/auth/password")
@@ -364,6 +378,10 @@ def _auto_prune(cfg: dict, log: Path) -> None:
 
 @app.post("/api/runs")
 async def start_run(req: StartReq, user: dict = Depends(current_user)):
+    if code_stale():
+        # Хуучин санах ойн код + дискэн дээрх шинэ код холилдвол худал алдаа/bug үүснэ
+        raise HTTPException(409, "Системийн код шинэчлэгдсэн боловч сервер дахин асаагдаагүй байна — серверийг "
+                                 "зогсоож (Ctrl+C) `python -m app`-аар дахин асаагаад эхлүүлнэ үү")
     url = normalize_url(req.url)
     if not url:
         raise HTTPException(400, "URL заавал")
