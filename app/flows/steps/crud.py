@@ -89,7 +89,7 @@ async def crud_search(env, args: dict) -> dict:
     text = str(args["text"])
     expect = args.get("expect", "found")
     await ui.ensure_menu(env, args.get("menu"))
-    rows = await ui.grid_find(env, text)
+    rows = await ui.grid_find_settled(env, text, expect)
     if expect == "absent":
         if rows:
             raise StepFailed(f"'{text}' олдохгүй байх ёстой байсан ч {len(rows)} мөр олдлоо: {rows[0]}")
@@ -198,7 +198,7 @@ async def crud_delete(env, args: dict) -> dict:
             raise StepBlocked(f"Устгах боломжгүй — бичлэг өөр мэдээлэлд ашиглагдсан байж болзошгүй "
                               f"(тестийн өгөгдөл «{find}» үлдсэн): {str(e)[:300]}", e.findings) from None
         raise
-    rows = await ui.grid_find(env, find)
+    rows = await ui.grid_find_settled(env, find, "absent")
     if rows:
         await asyncio.sleep(1.0)                   # хожуу гарсан системийн алдаа (ж: RiskStatus) — шалтгааныг мэдээлнэ
         errors, _ = await ui.popup_problems(env)

@@ -439,7 +439,7 @@ async def list_flows(url: str):
         except FlowConfigError as e:
             spec, err = (raw if isinstance(raw, dict) else {"steps": raw}), str(e)
         out.append({"name": name, "code": flow_code(name, spec), "steps": len(spec.get("steps") or []),
-                    "recorded": bool(spec.get("recorded")),
+                    "recorded": bool(spec.get("recorded")), "type": spec.get("type") or "",
                     "description": flow_description(spec), "allowed": not reason and not err,
                     "reason": reason or err})
     return out

@@ -21,6 +21,8 @@ PROJ = key_of("Мастер дата", "Бүртгэл", "Төсөл", "/md/proj
 LOCK = key_of("Мастер дата", "Бүртгэл", "Түгжээ", "/md/lock")
 SCHED = key_of("Мастер дата", "Бүртгэл", "Давтамж", "/md/sched")
 EBAR = key_of("Мастер дата", "Бүртгэл", "И-баримт", "/md/ebar")
+CITY = key_of("Мастер дата", "Бүртгэл", "Хот", "/md/city")
+SLOW = key_of("Мастер дата", "Бүртгэл", "Удаан жагсаалт", "/md/slow")
 
 
 def f(label, **kw):
@@ -92,7 +94,7 @@ def deps_run(tmp_path_factory):
     rd = tmp_path_factory.mktemp("deps")
     with CrudServer() as srv:
         srv.state.deps = True
-        pipe, cfg = make_pipe(srv, rd, [{"kind": "autocrud", "menus": [LEAVE, EMP, NOTE, PROJ, LOCK, SCHED, EBAR]}], [])
+        pipe, cfg = make_pipe(srv, rd, [{"kind": "autocrud", "menus": [LEAVE, EMP, NOTE, PROJ, LOCK, SCHED, EBAR, CITY, SLOW]}], [])
         data = asyncio.run(pipe.run())
     summary = generate_reports(data, cfg, rd, verify=False)
     by = {}
@@ -206,3 +208,28 @@ def test_workflow_form_is_classified(deps_run):
     assert "тусгай үйлдэл" in ebar["meta"]["skipped"] and ebar["steps"][0]["category"] == "workflow"
     kinds = {g["kind"]: g for g in deps_run["summary"]["auto_skips"]}
     assert kinds["workflow"]["menus"] == ["Мастер дата / Бүртгэл / И-баримт"]
+
+
+@e2e
+def test_lookup_skips_all_row(deps_run):
+    """Lookup-ийн «999 Бүх улс» нэгтгэл мөрийг бусад мөр байвал сонгохгүй (HR «Хот, аймаг»)."""
+    city = deps_run["by"][CITY]
+    assert city["status"] == M.PASS, steps_of(city)
+    assert "Монгол" in city["meta"]["fields"]["Улс"] and "Бүх" not in city["meta"]["fields"]["Улс"]
+
+
+@e2e
+def test_delayed_grid_refresh_is_not_a_failure(deps_run):
+    """Хадгалсан/устгасан бичлэг жагсаалтад хоцорч тусах үед хайлт/устгалын шалгалт хүлээж дахин оролдоно
+    (HR 2026-10-14: «мөр олдсонгүй», «устгасны дараа мөр хэвээр» гэсэн худал Fail)."""
+    slow = deps_run["by"][SLOW]
+    assert slow["status"] == M.PASS, steps_of(slow)
+
+
+def test_validation_target_phrasings():
+    from app.flows.ui import validation_targets
+    t = ["Анхаар", "Анхааруулга"]
+    assert validation_targets("Анхааруулга\nБүлэг сонгоогүй байна.", t) == ["Бүлэг"]
+    assert validation_targets("Анхааруулга\nУлс сонгогдоогүй байна!", t) == ["Улс"]
+    assert validation_targets("Анхаар\nЗөвшөөрөх эсвэл цуцлах хүний тоо 0 байж болохгүй!", t) == \
+        ["Зөвшөөрөх эсвэл цуцлах хүний тоо"]

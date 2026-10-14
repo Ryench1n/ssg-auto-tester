@@ -105,11 +105,38 @@ def load_flow(cfg: dict, name: str) -> dict:
     spec = flows[name]
     if isinstance(spec, list):
         spec = {"steps": spec}
+    if any("include" in s for s in spec.get("steps") or []):
+        spec = {**spec, "steps": _expand(flows, name, spec.get("steps") or [], [name])}
     for i, s in enumerate(spec.get("steps") or [], 1):
         if s.get("uses") not in STEPS:
             raise FlowConfigError(f"#{i} алхам: '{s.get('uses')}' гэсэн алхам бүртгэгдээгүй. "
                                   f"Байгаа: {', '.join(sorted(STEPS))}")
     return spec
+
+
+def _expand(flows: dict, name: str, steps: list, chain: list[str]) -> list:
+    """`- include: "rec: Борлуулалт бүртгэх"` → тэр урсгалын алхмууд (нэр нь «[урсгал] алхам»). Бичсэн урсгал,
+    YAML урсгалыг бизнес сценарийн бүрэлдэхүүн болгон дахин ашиглана. `always: true` include-ийн бүх алхамд үйлчилнэ."""
+    out = []
+    for s in steps:
+        if "include" not in s:
+            out.append(s)
+            continue
+        inc = str(s["include"])
+        if inc in chain:
+            raise FlowConfigError(f"'{name}': include давталт ({' → '.join(chain + [inc])})")
+        if len(chain) > 5:
+            raise FlowConfigError(f"'{name}': include хэт гүн (>5)")
+        if inc not in flows:
+            raise FlowConfigError(f"'{name}': include '{inc}' урсгал тохиргоонд алга")
+        sub = flows[inc]
+        sub_steps = sub if isinstance(sub, list) else (sub.get("steps") or [])
+        for x in _expand(flows, inc, sub_steps, chain + [inc]):
+            y = {**x, "name": f"[{inc.replace('rec: ', '')}] {x.get('name') or x.get('uses')}"}
+            if s.get("always"):
+                y["always"] = True
+            out.append(y)
+    return out
 
 
 def flow_code(name: str, spec: dict | None = None) -> str:

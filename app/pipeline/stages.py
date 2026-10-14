@@ -210,16 +210,21 @@ class CrudStage(Stage):
     def _engine(self, pipe: "PipelineRunner", spec: StepSpec) -> FlowEngine:
         # flow-д `run_tag:` заасан бол (ж: өмнөх run-ы үлдсэн тестийн өгөгдлийг цэвэрлэх) тусдаа контекст —
         # crud.* алхмын run_tag хамгаалалт зөвхөн тэр tag-тай бичлэгт хүрэхийг зөвшөөрнө
-        own_tag = (load_flow(pipe.cfg, spec.flow) or {}).get("run_tag")
+        fspec = load_flow(pipe.cfg, spec.flow) or {}
+        own_tag = fspec.get("run_tag")
         ctx = FlowContext(str(own_tag)) if own_tag else pipe.flow_ctx
+        if own_tag:
+            ctx.data.update(((pipe.cfg.get("e2e") or {}).get("vars") or {}))
+        meta = {"e2e": True} if fspec.get("type") == "e2e" else None
         return FlowEngine(pipe.url, spec.flow, pipe.cfg, pipe.run_dir, ctx=ctx, runlog=pipe.runlog,
                           session=pipe.session, cancel_event=pipe.halt, emit=pipe.emit, run_id=pipe.run_id,
-                          code=pipe.flow_codes[spec.flow])
+                          code=pipe.flow_codes[spec.flow], meta=meta)
 
     async def run(self, pipe: "PipelineRunner", spec: StepSpec) -> tuple[str, str]:
         run = await self._engine(pipe, spec).execute(pipe.page, pipe.col)
         pipe.data.flows.append(run.to_dict())
-        pipe.data.timeline.append(TimelineEvent(now_iso(), f"E2E урсгал «{spec.flow}» ({len(run.steps)} алхам)",
+        kind = "Бизнес процесс" if run.meta.get("e2e") else "E2E урсгал"
+        pipe.data.timeline.append(TimelineEvent(now_iso(), f"{kind} «{spec.flow}» ({len(run.steps)} алхам)",
                                                 run.status, f"run_tag {run.run_tag}"))
         n_pass = sum(1 for s in run.steps if s.status == M.PASS)
         first_bad = next((s for s in run.steps if s.status != M.PASS), None)
@@ -367,12 +372,18 @@ class AutoCrudStage(Stage):
         eng = FlowEngine(pipe.url, name, cfg, pipe.run_dir, ctx=pipe.flow_ctx, runlog=pipe.runlog,
                          session=pipe.session, cancel_event=pipe.halt, emit=pipe.emit, run_id=pipe.run_id,
                          code=code, meta={"auto": True, "menu": menu_path(item), "menu_key": key, **(meta or {})})
+        tabs0 = await _tabs(pipe)
         run = await eng.execute(pipe.page, pipe.col)
         try:
             await ui.close_form(eng)          # дараагийн цэсэнд нээлттэй форм/цонх саад болохгүй
             await ui.clear_toasts(eng)        # хуучин анхааруулгын toast дараагийн цэсийг Fail болгохгүй
-        except Exception:
-            pass
+            # Форм шалгалт шиг цэсний табыг хаана — хуримтлагдвал апп удааширч, таб мөрөөс халин шинэ цэсний
+            # товчнууд танигдахаа больдог (HR: A33–A50 «Нэмэх товч олдсонгүй»)
+            extra = [t for t in await _tabs(pipe) if t not in tabs0]
+            if extra:
+                await ui.close_tabs(eng, extra)
+        except Exception as e:
+            pipe.runlog.log(f"Автомат CRUD: цэвэрлэгээний алдаа {e!r}", "warn", to_ui=False)
         if replace_at is None:
             pipe.data.flows.append(run.to_dict())
         else:

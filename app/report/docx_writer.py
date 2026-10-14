@@ -119,7 +119,12 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
                       + ", ".join(f"{m} ({c})" for m, c in by_mod.items()))
     for fl in flows_t:
         if not is_form_flow(fl) and not (fl.get("meta") or {}).get("auto"):
-            tested.append(f"✅ E2E урсгал «{fl['flow']}» ({_tc_prefix(fl)}-xxx)")
+            if (fl.get("meta") or {}).get("e2e"):
+                n_delta = sum(1 for s in fl.get("steps") or [] if s.get("uses") == "assert.delta")
+                tested.append(f"✅ Бизнес процессын E2E «{fl['flow']}» ({_tc_prefix(fl)}-xxx) — "
+                              f"тайлангаар баталгаажуулсан {n_delta} шалгалт (Δ)")
+            else:
+                tested.append(f"✅ E2E урсгал «{fl['flow']}» ({_tc_prefix(fl)}-xxx)")
 
     if form_only:
         untested.append("Хадгалах, засах, устгах (өгөгдөл өөрчлөх) — форм шалгалт READ-ONLY тул хамрагдаагүй; "
@@ -165,7 +170,9 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
     if na:
         untested.append(f"Засварын форм — тест орчинд өгөгдөлгүй (N/A) {len(na)} цэс: {', '.join(na[:10])}"
                         + (f" … +{len(na) - 10}" if len(na) > 10 else "") + "; тест өгөгдөл оруулбал шалгагдана")
-    untested += ["Батлах, бизнес процесс, интеграцийн урсгал — хамрагдаагүй",
+    if not any((f.get("meta") or {}).get("e2e") for f in flows_t):
+        untested.append("Батлах, бизнес процесс (тайлангаар баталгаажуулах E2E) — энэ run-д хамрагдаагүй")
+    untested += ["Интеграцийн урсгал (И-баримт, банк) — хамрагдаагүй",
                  "Mobile, бусад хөтөч (Firefox, Safari) — хамрагдаагүй (зөвхөн Chromium)"]
 
     # 2.3 — урсгалын ТОВЧ: форм шалгалт / автомат CRUD нь зөвхөн Fail/Blocked цэсүүд (нэг мөр),
@@ -234,10 +241,14 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
         if is_form_flow(fl) or (fl.get("meta") or {}).get("auto"):
             continue
         data = fl.get("data") or {}
+        e2e = (fl.get("meta") or {}).get("e2e")
+        deltas = [n for s in fl.get("steps") or [] if s.get("uses") == "assert.delta" for n in s.get("notes") or []]
         flows.append({
-            "name": fl["flow"], "tc": _tc_prefix(fl), "status": fl.get("status") or "",
+            "name": ("Бизнес процесс: " if e2e else "") + fl["flow"], "tc": _tc_prefix(fl),
+            "status": fl.get("status") or "",
             "info": f"run_tag: {fl.get('run_tag') or ''}  |  Дамжсан өгөгдөл: "
-                    + (", ".join(f"{k} = {v}" for k, v in data.items()) or "—"),
+                    + (", ".join(f"{k} = {v}" for k, v in data.items() if not isinstance(v, dict)) or "—")
+                    + (f"  |  Тайлангийн шалгалт (Δ): {' / '.join(deltas)}" if deltas else ""),
             "cleanup": _cleanup(fl),
             "steps": [f"{_tc_prefix(fl)}-{s['index']:03d} {s['name']} — {s['status']}"
                       + (f": {_short(s.get('message'))}" if s.get("message") else "") for s in fl.get("steps") or []],

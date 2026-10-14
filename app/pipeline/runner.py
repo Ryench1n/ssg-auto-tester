@@ -49,6 +49,8 @@ class PipelineRunner:
         self.cdp = cdp                       # өөрийн Chrome-д холбогдох (captcha-тай сайт) — CDP URL
         self.halt = asyncio.Event()          # хэрэглэгч зогсоосон ЭСВЭЛ session алдагдсан
         self.flow_ctx = FlowContext(run_tag or make_run_tag())
+        # E2E орчны утгууд (тест компани, тайлант үе, мастер өгөгдлийн код …) — сценарид {нэр}-ээр
+        self.flow_ctx.data.update({k: v for k, v in ((cfg.get("e2e") or {}).get("vars") or {}).items()})
         self.data = RunData(run_id=run_id, url=url, project=options.project, qa_lead=options.qa_lead,
                             tester=options.tester,
                             version_label=options.version_label, run_tag=self.flow_ctx.run_tag)

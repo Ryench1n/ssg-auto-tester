@@ -174,6 +174,12 @@
         <div class="desc">«Урсгал бичих»-ээр бичиж хадгалсан урсгалуудыг дахин тоглуулна (өгөгдөл өөрчилнө, run_tag-тай).</div>
         <div class="flows" id="recFlows"><small class="muted">URL оруулна уу</small></div>
       </div>
+      <div class="step" id="cardE2e"><span class="n">6</span>
+        <label class="head">🔗 Бизнес процессын E2E</label>
+        <div class="desc">Баримт үүсгэх → батлах → тайлангаар (Δ) баталгаажуулах → цуцлах сценариуд
+          (<code>config/sites/&lt;host&gt;.yaml</code> → <code>type: e2e</code>). Өгөгдөл өөрчилнө, run_tag-тай.</div>
+        <div class="flows" id="e2eFlows"><small class="muted">URL оруулна уу</small></div>
+      </div>
     </div>
     <div class="mutwarn hidden" id="mutWarn">⚠ Өгөгдөл өөрчилнө — зөвхөн тест орчинд, run_tag-тай. Бүртгэсэн бичлэг бүр run_tag агуулж, урсгалын төгсгөлд цэвэрлэгдэнэ.</div>
 
@@ -379,8 +385,9 @@ function syncSteps() {
   $('autoOpts').classList.toggle('hidden', !auto);
   $('menuCat').classList.toggle('hidden', !(auto && $('autoCat').checked));
   $('mutWarn').classList.toggle('hidden', !auto);
-  const nRec = document.querySelectorAll('.recchk:checked').length;
-  $('cardRec').classList.toggle('on', nRec > 0);
+  const nRec = document.querySelectorAll('.recchk:checked').length + document.querySelectorAll('.e2echk:checked').length;
+  $('cardRec').classList.toggle('on', document.querySelectorAll('.recchk:checked').length > 0);
+  $('cardE2e').classList.toggle('on', document.querySelectorAll('.e2echk:checked').length > 0);
   const n = 1 + ($('stSmoke').checked ? 1 : 0) + ($('stForm').checked ? 1 : 0) + (auto ? 1 : 0) + nRec;
   $('mutWarn').classList.toggle('hidden', !(auto || nRec));
   $('btnStart').textContent = `Сонгосон ${n} алхмыг эхлүүлэх`;
@@ -414,7 +421,16 @@ async function loadRecorded() {
   const u = $('url').value.trim();
   if (!u) { $('recFlows').innerHTML = '<small class="muted">URL оруулна уу</small>'; return; }
   let flows = [];
-  try { const r = await fetch('/api/flows?url=' + encodeURIComponent(u)); if (r.ok) flows = (await r.json()).filter(f => f.recorded); } catch (e) {}
+  let all = [];
+  try { const r = await fetch('/api/flows?url=' + encodeURIComponent(u)); if (r.ok) all = await r.json(); } catch (e) {}
+  flows = all.filter(f => f.recorded);
+  const e2e = all.filter(f => f.type === 'e2e');
+  $('e2eFlows').innerHTML = e2e.length ? e2e.map(f => `<label class="${f.allowed ? '' : 'off'}">
+      <input type="checkbox" class="e2echk" value="${esc(f.name)}" ${f.allowed ? '' : 'disabled'}>
+      <span><b>${esc(f.name)}</b> <span class="muted">(${f.code}, ${f.steps} алхам)</span>
+      <small>${esc(f.allowed ? f.description : f.reason)}</small></span></label>`).join('')
+    : '<small class="muted">Энэ сайтад E2E сценари тохируулаагүй</small>';
+  document.querySelectorAll('.e2echk').forEach(c => c.onchange = syncSteps);
   $('recFlows').innerHTML = flows.length ? flows.map(f => `<label class="${f.allowed ? '' : 'off'}">
       <input type="checkbox" class="recchk" value="${esc(f.name)}" ${f.allowed ? '' : 'disabled'}>
       <span><b>${esc(f.name.replace(/^rec: /, ''))}</b> <span class="muted">(${f.code}, ${f.steps} алхам)</span>
@@ -650,7 +666,7 @@ $('btnStart').onclick = async () => {
       steps.push({kind: 'autocrud', menus});
     }
   }
-  for (const c of document.querySelectorAll('.recchk:checked')) steps.push({kind: 'crud', flow: c.value});
+  for (const c of document.querySelectorAll('.recchk:checked, .e2echk:checked')) steps.push({kind: 'crud', flow: c.value});
   if (!steps.length) { $('startMsg').textContent = 'Нэвтрэхээс гадна дор хаяж нэг алхам сонгоно уу.'; return; }
   startRun(steps);
 };

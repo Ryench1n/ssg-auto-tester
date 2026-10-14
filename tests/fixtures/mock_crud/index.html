@@ -144,6 +144,7 @@ function render() {
   else if (cur && cur.kind === 'md') content.appendChild(mdView());
   else if (cur && cur.kind === 'dbset') content.appendChild(dbsetView());
   else if (cur && MINI_DEFS[cur.kind]) content.appendChild(miniView(cur.kind));
+  else if (cur && cur.kind === 'tb') content.appendChild(tbView());
   else content.appendChild($(`<div class="tab-body">${active}</div>`));
   layout.appendChild(content);
   root.appendChild(layout);
@@ -964,7 +965,66 @@ const MINI_DEFS = {
   // «И-баримт»: тусгай үйлдэл (мэдээлэл татах) шаарддаг — автоматаар хийхгүй, «workflow» гэж ангилна
   ebar: {cols: ['Гүйлгээний утга'], fields: [{label: 'Гүйлгээний утга *', name: 'name'}],
          validate: () => 'Мэдээлэл татна уу!'},
+  // «Хот»: «Улс» lookup-ийн эхний мөр «999 Бүх улс» — сонговол «Улс сонгогдоогүй байна!» (HR «Хот, аймаг»)
+  city: {cols: ['Нэр', 'Улс'], fields: [{label: 'Нэр *', name: 'name'}, {label: 'Улс *', name: 'country', kind: 'lookup', src: 'countries'}],
+         validate: (v) => !v.name ? 'Нэр оруулна уу' : (!v.country || /Бүх/.test(v.country)) ? 'Улс сонгогдоогүй байна!' : ''},
+  // «Удаан жагсаалт»: хадгалсан/устгасан бичлэг жагсаалтад 1.2 сек хоцорч тусна (grid дахин ачаалал)
+  slow: {cols: ['Нэр'], fields: [{label: 'Нэр *', name: 'name'}], validate: (v) => !v.name ? 'Нэр оруулна уу' : '', delay: 1200},
 };
+/* E2E: «Борлуулалт» — Дугаар (БР0001…) систем үүсгэнэ, Төлөв: Ноорог → «Батлах» (1201 Дт / 5101 Кт бичигдэнэ) →
+ * «Цуцлах» (буцаалт). Батлагдсан баримтыг засах/устгахгүй. «Гүйлгээ баланс» — бодит эхний үлдэгдэл + зөвхөн
+ * батлагдсан баримтын гүйлгээ; «Шүүх» дарж байж харагдана, «Файл үүсгэх» → «Excel» (CSV татах). */
+MINI_DEFS.sale = {cols: ['Дугаар', 'Тайлбар', 'Дүн', 'Төлөв'],
+  fields: [{label: 'Тайлбар *', name: 'desc'}, {label: 'Дүн *', name: 'amount'}],
+  validate: (v) => !v.desc ? 'Тайлбар оруулна уу' : !(+v.amount > 0) ? 'Дүн оруулна уу' : '',
+  extraCols: (r) => [r.number || '', r.status || 'Ноорог'],
+  onCreate: (r) => { r.number = 'БР' + String(r.id).padStart(4, '0'); r.status = 'Ноорог'; },
+  actions: {
+    'Батлах': (r) => r.status === 'Ноорог' ? (r.status = 'Батлагдсан', '') : 'Зөвхөн ноорог баримтыг батална',
+    'Цуцлах': (r) => r.status === 'Батлагдсан' ? (r.status = 'Цуцлагдсан', '') : 'Батлагдсан баримтыг л цуцална',
+  },
+  locked: (r) => r.status && r.status !== 'Ноорог'};
+const ACCOUNTS_TB = [{code: '1201', name: 'Авлага', base: 500000}, {code: '5101', name: 'Борлуулалтын орлого', base: -800000},
+                     {code: '1001', name: 'Касс', base: 120000}];
+function tbData() {
+  const sales = (MINI.sale ? MINI.sale.rows : []).filter(r => r.status === 'Батлагдсан');
+  const sum = sales.reduce((a, r) => a + (+r.amount || 0), 0);
+  return ACCOUNTS_TB.map(a => {
+    const dt = a.code === '1201' ? sum : 0, kt = a.code === '5101' ? sum : 0;
+    return {code: a.code, name: a.name, dt, kt, end: a.base + dt - kt};
+  });
+}
+const fmt = (n) => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+let tbShown = false;
+function tbView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar">
+      <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Эхлэх огноо:</label><div class="dxbl-fl-ctrl"><span class="dxbl-text-edit slDate"><input name="from" value="2026-01-01"></span></div></div>
+      <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Дуусах огноо:</label><div class="dxbl-fl-ctrl"><span class="dxbl-text-edit slDate"><input name="to" value=""></span></div></div>
+      <button class="dxbl-btn run">Шүүх</button> <button class="dxbl-btn exp">Файл үүсгэх</button></div>`);
+  bar.querySelector('.run').onclick = () => { tbShown = true; render(); };
+  bar.querySelector('.exp').onclick = () => {
+    if (v.querySelector('[role=menu]')) return;
+    const m = $(`<div role="menu" class="dxbl-dropdown-body"><div role="menuitem" class="xl">Excel</div><div role="menuitem">PDF</div></div>`);
+    m.querySelector('.xl').onclick = () => {
+      const lines = [['Дансны код', 'Дансны нэр', 'Дебет', 'Кредит', 'Эцсийн үлдэгдэл']]
+        .concat(tbData().map(r => [r.code, r.name, fmt(r.dt), fmt(r.kt), fmt(r.end)]));
+      const csv = lines.map(l => l.map(x => `"${x}"`).join(';')).join('\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob(['﻿' + csv], {type: 'text/csv'}));
+      a.download = 'trialbalance.csv'; document.body.appendChild(a); a.click(); a.remove(); m.remove();
+    };
+    v.appendChild(m);
+  };
+  v.appendChild(bar);
+  if (!tbShown) { v.appendChild($(`<div class="muted">Шүүлтийн нөхцөлөө сонгоод «Шүүх» дарна уу</div>`)); return v; }
+  const t = $(`<table class="dxbl-grid"><thead><tr><th>Дансны код</th><th>Дансны нэр</th><th>Дебет</th><th>Кредит</th><th>Эцсийн үлдэгдэл</th></tr></thead><tbody></tbody></table>`);
+  for (const r of tbData())
+    t.querySelector('tbody').appendChild($(`<table><tr role="row"><td>${r.code}</td><td>${r.name}</td><td>${fmt(r.dt)}</td><td>${fmt(r.kt)}</td><td>${fmt(r.end)}</td></tr></table>`).querySelector('tr'));
+  v.appendChild(t);
+  return v;
+}
+MINI.countries = {rows: [{id: 999, name: 'Бүх улс'}, {id: 496, name: 'Монгол'}], seq: 0, q: '', sel: null};
 const miniState = (kind) => MINI[kind] || (MINI[kind] = {rows: [], seq: 0, q: '', sel: null});
 
 function miniView(kind) {
@@ -977,21 +1037,36 @@ function miniView(kind) {
   bar.querySelector('.edit').onclick = () => { const r = st.rows.find(x => x.id === st.sel); if (r) miniForm(kind, r); };
   bar.querySelector('.del').onclick = () => {
     const r = st.rows.find(x => x.id === st.sel); if (!r) return;
+    if (d.locked && d.locked(r)) { warnModal('Батлагдсан баримтыг устгах боломжгүй'); return; }
     const m = $(`<div class="dxbl-modal" role="dialog"><div>Устгахдаа итгэлтэй байна уу?</div>
       <button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
     m.querySelector('.no').onclick = () => m.remove();
     m.querySelector('.yes').onclick = () => {
       m.remove();
       if (d.deleteError) { warnModal(d.deleteError); return; }
-      st.rows = st.rows.filter(x => x.id !== r.id); st.sel = null; render(); };
+      const drop = () => { st.rows = st.rows.filter(x => x.id !== r.id); st.sel = null; render(); };
+      if (d.delay) setTimeout(drop, d.delay); else drop(); };
     document.body.appendChild(m);
   };
   const inp = bar.querySelector('input');
   inp.onkeydown = (e) => { if (e.key === 'Enter') { st.q = inp.value; render(); } };
   v.appendChild(bar);
+  for (const [name, fn] of Object.entries(d.actions || {})) {
+    const b = $(`<button class="dxbl-btn act">${name}</button>`);
+    b.onclick = () => {
+      const r = st.rows.find(x => x.id === st.sel); if (!r) return;
+      const m = $(`<div class="dxbl-modal" role="dialog"><div>${name} үйлдэл хийх үү?</div>
+        <button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
+      m.querySelector('.no').onclick = () => m.remove();
+      m.querySelector('.yes').onclick = () => { m.remove(); const err = fn(r); if (err) warnModal(err); render(); };
+      document.body.appendChild(m);
+    };
+    bar.insertBefore(b, bar.querySelector('.dxbl-grid-search-box'));
+  }
   const t = $(`<table class="dxbl-grid"><thead><tr>${d.cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody></tbody></table>`);
-  const vals = (r) => d.fields.map(f => r[f.name] || '');
-  for (const r of st.rows.filter(r => !st.q || vals(r).join(' ').toLowerCase().includes(st.q.toLowerCase()))) {
+  const vals = (r) => d.extraCols ? [r.number || '', ...d.fields.map(f => r[f.name] || ''), r.status || 'Ноорог']
+                                  : d.fields.map(f => r[f.name] || '');
+  for (const r of st.rows.filter(r => !r.hidden).filter(r => !st.q || vals(r).join(' ').toLowerCase().includes(st.q.toLowerCase()))) {
     const tr = $(`<table><tr role="row" class="${r.id === st.sel ? 'dxbl-grid-selected-row dxbl-grid-focused-row' : ''}">
       ${vals(r).map(x => `<td>${esc(x) || '&nbsp;'}</td>`).join('')}</tr></table>`).querySelector('tr');
     tr.onclick = () => { st.sel = r.id; render(); };
@@ -1023,7 +1098,12 @@ function miniForm(kind, rec) {
     const err = d.validate(v);
     if (err) { toast(err); return; }
     if (rec) { if (d.onUpdate) d.onUpdate(rec, v); Object.assign(rec, v); }
-    else st.rows.push({id: ++st.seq, ...v});
+    else {
+      const row = {id: ++st.seq, ...v, hidden: !!d.delay};
+      if (d.onCreate) d.onCreate(row);
+      st.rows.push(row);
+      if (d.delay) setTimeout(() => { row.hidden = false; render(); }, d.delay);
+    }
     m.remove();
     render();
     if (!rec && d.afterCreate) d.afterCreate();

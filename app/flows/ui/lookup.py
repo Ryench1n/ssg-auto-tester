@@ -27,8 +27,9 @@ def validation_targets(message: str, titles: list[str]) -> list[str]:
                 break
         if not line:
             continue
-        m = re.match(r"^(.{2,40}?)\s+(оруулна|сонгоно|татна|бөглөнө|хоосон байх|хоосон байна|заавал)",
-                     line, flags=re.I)
+        # «Бүлэг сонгоогүй байна», «Улс сонгогдоогүй байна!», «… хүний тоо 0 байж болохгүй!» (HR, 2026-10-14)
+        m = re.match(r"^(.{2,60}?)\s+(?:0\s+)?(оруулна|сонгоно|сонгоогүй|сонгогдоогүй|татна|бөглөнө|хоосон байх|"
+                     r"хоосон байна|заавал|байж болохгүй)", line, flags=re.I)
         if m:
             out.append(m.group(1).strip(" :*-!"))
     return out

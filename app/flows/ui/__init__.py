@@ -127,6 +127,7 @@ from app.flows.ui.grid import (  # noqa: F401
     form_values,
     FORM_VALUES_JS,
     grid_find,
+    grid_find_settled,
     MARK_ANY_ROW_JS,
     MARK_ROW_TARGET_JS,
     only_tagged_focus,

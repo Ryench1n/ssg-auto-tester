@@ -255,7 +255,11 @@ MARK_LOOKUP_ROW_JS = r"""
     const byGrid = new Map();
     for (const r of rows) { const g = r.closest('dxbl-grid, .dxbl-grid, table') || root;
                             if (!byGrid.has(g)) byGrid.set(g, []); byGrid.get(g).push(r); }
-    const grid = [...byGrid.values()].sort((a, b) => b.length - a.length)[0];
+    let grid = [...byGrid.values()].sort((a, b) => b.length - a.length)[0];
+    // «999 Бүх улс», «Бүх Бүх» — нэгтгэл (бүгд) мөр: систем ихэвчлэн хүлээж авдаггүй (HR «Хот, аймаг»: «Улс
+    // сонгогдоогүй байна!») — өөр мөр байвал тэрийг сонгоно
+    const allRow = (r) => /^(\d+\s+)?бүх(\s|$)/i.test(__txt(r).replace(/^[^\p{L}\p{N}]+/u, '').trim());
+    if (grid.some(r => !allRow(r))) grid = grid.filter(r => !allRow(r));
     row = grid.find(r => /focused-row|selected-row/.test(cls(r)) || r.getAttribute('aria-selected') === 'true') || grid[0];
   } else {
     // Зөвхөн модтой lookup (Дансны бүлэг, Загварын бүлэг, Барааны бүлэг): «Бүх …» үндсэн зангилааг биш,

@@ -44,7 +44,7 @@ async def auto_verify(env, args: dict) -> dict:
     (хадгалагдсан мэт харагдсан ч зарим талбар алга болсон bug). Юу ч хадгалахгүй хаана."""
     find, field = str(args["find"]), str(args["field"])
     await ui.ensure_menu(env, args.get("menu"))
-    rows = await ui.grid_find(env, find)
+    rows = await ui.grid_find_settled(env, find)
     if not rows:
         raise StepFailed(f"'{find}' хайлтаар мөр олдсонгүй")
     snap = env.ctx.data.get(str(args.get("values") or "")) or {}

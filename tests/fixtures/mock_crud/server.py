@@ -30,6 +30,8 @@ class CrudState:
         # Автомат CRUD-ийн сайжруулалт: мастер өгөгдөл (Ажилтан → Чөлөө), DateEdit-ийг шошгоор таних,
         # засварт талбар алга болох bug, validation-гүй хоосон хадгалалт, алдаа гарсан ч хадгалагдах
         self.deps = False
+        # E2E (Үе 1): «Борлуулалт» баримт (ноорог → батлах → цуцлах) + «Гүйлгээ баланс» тайлан (зөвхөн батлагдсан)
+        self.e2e = False
         self.jobs_created = self.jobs_deleted = 0
         self.stopping = threading.Event()
 
@@ -105,6 +107,11 @@ def make_handler(state: CrudState):
                 extra += "{name: 'Түгжээ', href: '/md/lock', kind: 'lock'},"
                 extra += "{name: 'Давтамж', href: '/md/sched', kind: 'sched'},"
                 extra += "{name: 'И-баримт', href: '/md/ebar', kind: 'ebar'},"
+                extra += "{name: 'Хот', href: '/md/city', kind: 'city'},"
+                extra += "{name: 'Удаан жагсаалт', href: '/md/slow', kind: 'slow'},"
+            if state.e2e:
+                extra += "{name: 'Борлуулалт', href: '/md/sale', kind: 'sale'},"
+                extra += "{name: 'Гүйлгээ баланс', href: '/rv/trialbalance', kind: 'tb'},"
             html = html.replace(b"/*EXTRA_ITEMS*/", extra.encode())
             return self._send(200, html, "text/html; charset=utf-8")
 

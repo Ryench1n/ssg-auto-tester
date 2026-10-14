@@ -45,3 +45,74 @@ flows:
       - uses: crud.search
         name: "Устгагдсаныг шалгах"
         with: {text: "{group_name}", expect: absent}
+
+  # ---------------------------------------------------------------- Бизнес процессын E2E (Үе 2: Order-to-Cash)
+  # Бэлтгэл (нэг удаа, тест орчинд):
+  #   1. Доорх e2e.vars-ийг тест компанийн утгаар бөглөнө (данс, дүн, тайлант үе).
+  #   2. UI «🎥 Урсгал бичих»-ээр хоёр бүрэлдэхүүн бичнэ: «Борлуулалт бүртгэх» (Гүйлгээний утга = {run_tag} …,
+  #      харилцагч, бараа, тоо {sale_qty}, үнэ) ба «Кассын орлого бүртгэх» (тэр харилцагчаас {sale_total}).
+  #   3. Эхний ажиллуулалтаар тайлангийн багана/мөрийг (report.read rows) баталгаажуулна (калибровк).
+  # Бүрэлдэхүүн бичигдээгүй / vars бөглөөгүй бол UI-д шалтгаантайгаа идэвхгүй харагдана.
+  "O2C: Борлуулалт → Касс → Гүйлгээ баланс":
+    type: e2e
+    code: O2C
+    description: "Борлуулалт (авлага үүснэ) → кассын орлого (авлага хаагдана) → Гүйлгээ балансаар Δ → цуцалж Δ = 0"
+    steps:
+      - &tb
+        uses: report.read
+        name: "Гүйлгээ баланс — эхний төлөв"
+        with: &tbw
+          menu: "Ерөнхий дэвтэр / Тайлан / Гүйлгээ баланс"
+          params: {"Эхлэх огноо": "{period_from}", "Дуусах огноо": "{today}"}
+          run: ["Шүүх"]
+          mode: export                      # report viewer — «Файл үүсгэх» → Excel файлаас уншина
+          export: ["Файл үүсгэх", "Excel"]
+          rows:
+            avlaga: {match: "{acc_receivable}", column: "Эцсийн үлдэгдэл"}
+            orlogo: {match: "{acc_revenue}", column: "Эцсийн үлдэгдэл"}
+            kass: {match: "{acc_cash}", column: "Эцсийн үлдэгдэл"}
+          save_as: tb0
+      - include: "rec: Борлуулалт бүртгэх"
+      - uses: doc.number
+        name: "Борлуулалтын баримтын дугаар"
+        with: {menu: "Борлуулалт / Жагсаалт / Борлуулалтын жагсаалт", find: "{run_tag}", column: "№", save_as: sale_no}
+      - <<: *tb
+        name: "Гүйлгээ баланс — борлуулалтын дараа"
+        with: {<<: *tbw, save_as: tb1}
+      - uses: assert.delta
+        name: "Борлуулалт: авлага өсч, орлого бичигдсэн"
+        with: {before: tb0, after: tb1, expect: {avlaga: "{sale_total}", orlogo: "-{sale_net}", kass: 0}}
+      - include: "rec: Кассын орлого бүртгэх"
+      - <<: *tb
+        name: "Гүйлгээ баланс — төлбөрийн дараа"
+        with: {<<: *tbw, save_as: tb2}
+      - uses: assert.delta
+        name: "Төлбөр: авлага хаагдаж, касс өссөн"
+        with: {before: tb0, after: tb2, expect: {avlaga: 0, orlogo: "-{sale_net}", kass: "{sale_total}"}}
+      # Цэвэрлэгээ (always) — урвуу дарааллаар устгаж, тайлан анхны төлөвтөө буцсаныг шалгана
+      - uses: crud.delete
+        name: "Цэвэрлэх: кассын орлого"
+        always: true
+        with: {menu: "Мөнгөн хөрөнгө / Жагсаалт / Кассын баримтын жагсаалт", find: "{run_tag}"}
+      - uses: crud.delete
+        name: "Цэвэрлэх: борлуулалт"
+        always: true
+        with: {menu: "Борлуулалт / Жагсаалт / Борлуулалтын жагсаалт", find: "{run_tag}"}
+      - <<: *tb
+        name: "Гүйлгээ баланс — цэвэрлэгээний дараа"
+        always: true
+        with: {<<: *tbw, save_as: tb3}
+      - uses: assert.delta
+        name: "Цэвэрлэгээ: тайлан анхны төлөвтөө (Δ = 0)"
+        always: true
+        with: {before: tb0, after: tb3, expect: {avlaga: 0, orlogo: 0, kass: 0}}
+
+# Тест компанийн утгууд (Үе 1-A) — бөглөнө үү. Бодит компани/үе дээр хэзээ ч ажиллуулахгүй.
+e2e:
+  vars:
+    period_from: "2026-01-01"
+    # acc_receivable: "1201"        # Авлагын данс (Гүйлгээ балансын «Дансны код»)
+    # acc_revenue: "5101"           # Борлуулалтын орлогын данс
+    # acc_cash: "1001"              # Кассын данс
+    # sale_net: "100000"            # Борлуулалтын НӨАТ-гүй дүн (бичсэн урсгалын тоо × үнэ)
+    # sale_total: "110000"          # НӨАТ-тай нийт дүн (авлага / касс)

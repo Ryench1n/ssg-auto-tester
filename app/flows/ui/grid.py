@@ -29,6 +29,21 @@ async def grid_find(env: "FlowEngine", text: str) -> list[str]:
     return await env.page.evaluate(FIND_ROWS_JS, [sel_payload(env), text])
 
 
+async def grid_find_settled(env: "FlowEngine", text: str, expect: str = "found", tries: int = 3,
+                            wait_s: float = 1.5) -> list[str]:
+    """grid_find-ийг хүлээгдэж буй үр дүнд (found | absent) хүрэх хүртэл хэд дахин оролдоно: хадгалсан/устгасан
+    даруйд жагсаалт хараахан шинэчлэгдээгүй байж болно (HR 2026-10-14: «мөр олдсонгүй» гэсэн ч дараагийн алхам
+    тэр бичлэгийг олсон). Сүүлийн оролдлогын мөрүүдийг буцаана."""
+    rows: list[str] = []
+    for i in range(tries):
+        rows = await grid_find(env, text)
+        if bool(rows) == (expect == "found"):
+            return rows
+        if i < tries - 1:
+            await asyncio.sleep(wait_s)
+    return rows
+
+
 # Мөрийг сонгох аюулгүй цэг: сонголтын checkbox, эс бөгөөс бичлэг НЭЭДЭГ сум/холбоосгүй нүд
 # Мөрийг ФОКУСЛАХ цэг: бичлэг НЭЭДЭГ сум/холбоосгүй текст нүд. (Checkbox нь зөвхөн сонгодог — SmartApp-ын
 # «Засах/Устгах» ФОКУСЛАГДСАН мөр дээр ажилладаг тул checkbox дармагц өөр бичлэг засагдах эрсдэлтэй — 2026-09-29.)
