@@ -107,6 +107,9 @@ def test_record_save_and_replay(recdir, tmp_path, monkeypatch):
         d = asyncio.run(pipe.run())
         rec = d.recording
         assert rec and rec["steps"] >= 8, rec
+        import json as _json
+        rj = _json.loads((tmp_path / "rec" / "recording.json").read_text(encoding="utf-8"))
+        assert len(rj["events"]) == rec["events"] and rj["steps"] and all(e.get("text") for e in rj["events"])
         assert any(t == "rec_event" for t, _ in events) and any(t == "rec_done" for t, _ in events)
         spec = yaml.safe_load(rec["yaml"])
         uses = [s["uses"] for s in spec["steps"]]
@@ -137,6 +140,11 @@ def test_record_save_and_replay(recdir, tmp_path, monkeypatch):
         assert srv.state.untagged_touched == 0
         assert any(c["name"] == "Бодит харилцагч ХХК" for c in srv.state.customers)
         assert fl["code"] == "R01"
+        # «Анхааруулга — …Устгахдаа итгэлтэй байна уу?» асуулт «Устгах» алхмыг Fail болгохгүй (HR «Тогтмол ажил»)
+        assert [s["uses"] for s in fl["steps"]][-2:] == ["ui.click", "ui.click"]
+        # Оношлогоо: тоглуулалтын алхам бүрийн дэлгэц + бичлэгийн түүхий үйлдэл
+        assert all(s["screenshot"] for s in fl["steps"]), [s["screenshot"] for s in fl["steps"]]
+        assert all((tmp_path / "play" / s["screenshot"]).exists() for s in fl["steps"])
 
         # Аюулгүй байдал: бодит (tag-гүй) мөр сонгоод «Устгах» → зогсооно
         bad = spec["steps"][:1] + [{"uses": "ui.search", "with": {"text": "Бодит"}},

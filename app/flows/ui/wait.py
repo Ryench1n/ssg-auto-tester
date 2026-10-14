@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import TYPE_CHECKING
 
@@ -62,6 +63,13 @@ async def popup_problems(env: "FlowEngine") -> tuple[list[Finding], list[str]]:
         # Форм өөрөө цонх — урт текстэд (шошгонууд) эдгээр үг таарч болох тул зөвхөн богино мессеж цонх
         return (not dialog or len(low) <= 300) and any(p in low for p in warn_pats)
 
+    def is_question(text: str) -> bool:
+        """Баталгаажуулах асуулт («… итгэлтэй байна уу?», «Хадгалах уу?») — гарчиг нь «Анхааруулга» байсан ч
+        validation анхааруулга биш: дараагийн алхам (Тийм/Үгүй) хариулна. Бичсэн урсгалд «Устгах» алхам
+        Fail болдог байсан (HR «Тогтмол ажил», 2026-10-05)."""
+        body = text.strip()
+        return len(body) <= 300 and bool(re.search(r"(уу|үү|юу|юү)\s*\?|итгэлтэй|\?\s*$", body, re.I))
+
     def is_error_dialog(text: str) -> bool:
         lines = [ln for ln in text.strip().split("\n") if ln.strip()]
         if len(text) <= 200 and len(lines) <= 4:
@@ -82,6 +90,8 @@ async def popup_problems(env: "FlowEngine") -> tuple[list[Finding], list[str]]:
     for d in st.dialogs:
         if is_error_dialog(d):
             errors.append(Finding(M.SYSTEM_ERROR, dialog_text(d)[:500]))
+        elif is_question(d):
+            continue                         # «Анхааруулга — …Устгахдаа итгэлтэй байна уу?» — асуулт, асуудал биш
         elif is_warning(d, dialog=True):     # «Анхаар — Данс оруулна уу!» мэт validation цонх
             warnings.append(dialog_text(d))
     for t in st.toasts:

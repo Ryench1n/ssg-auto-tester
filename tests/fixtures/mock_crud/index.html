@@ -714,8 +714,9 @@ async function openForm(rec) {
 function confirmDelete() {
   const rec = rows.find(r => r.id === selected);
   if (!rec) return;
-  const m = $(`<div class="dxbl-modal" role="dialog"><div>Устгахдаа итгэлтэй байна уу?</div>
-    <div>${esc(rec.name)}</div><button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
+  // Бодит SmartApp (HR, 2026-10-05): «Анхааруулга» гарчигтай асуулт — validation анхааруулга БИШ
+  const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Анхааруулга</div>
+    <div>${esc(rec.name)}: Устгахдаа итгэлтэй байна уу?</div><button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
   m.querySelector('.no').onclick = () => m.remove();
   m.querySelector('.yes').onclick = async () => {
     m.remove();

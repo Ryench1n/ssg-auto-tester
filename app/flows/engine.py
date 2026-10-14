@@ -401,6 +401,10 @@ class FlowEngine:
             res.notes += [f"{f.kind}: {f.text}" for f in found if f.kind not in HARD_KINDS]
         if res.status == M.PASS:
             self.ctx.data.update(res.outputs)
+            if (self.spec.get("recorded") and not res.screenshot
+                    and (self.cfg.get("flow") or {}).get("trace_recorded", True)):
+                # Бичсэн урсгалын тоглуулалт: алхам бүрийн дараах дэлгэц — бичлэгээс хаана зөрсөнийг харах
+                res.screenshot = await self.screenshot(f"{res.index:02d}-{res.uses.replace('.', '-')}")
         else:
             res.outputs = {}
             if not res.screenshot:        # алхам өөрөө (формыг хаахаас өмнө) авсан бол хадгална

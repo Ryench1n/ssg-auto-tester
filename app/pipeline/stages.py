@@ -714,6 +714,11 @@ class RecordStage(Stage):
             await rec.stop(pipe.page)
         flow, warnings = build_flow(rec.events)
         text = yaml.safe_dump(flow, allow_unicode=True, sort_keys=False, width=120)
+        # Оношлогоо: хүний бодит үйлдлүүд (бичлэг) ↔ үүссэн алхмууд — тоглуулалт зөрвөл юуг яаж ойлгосныг харах
+        import json as _json
+        (pipe.run_dir / "recording.json").write_text(_json.dumps(
+            {"name": spec.flow, "events": [{**ev, "text": describe(ev)} for ev in rec.events],
+             "steps": flow["steps"], "warnings": warnings}, ensure_ascii=False, indent=1), encoding="utf-8")
         pipe.data.recording = {"name": spec.flow, "yaml": text, "warnings": warnings,
                                "events": len(rec.events), "steps": len(flow["steps"])}
         pipe.emit("rec_done", pipe.data.recording)
