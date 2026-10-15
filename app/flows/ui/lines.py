@@ -6,7 +6,7 @@ import re
 import time
 from typing import TYPE_CHECKING
 
-from app.flows.ui._js import EDIT_ROW_JS, MARK_CELL_LOOKUP_JS, MARK_LINES_ADD_JS
+from app.flows.ui._js import FORM_TAB_JS, EDIT_ROW_JS, MARK_CELL_LOOKUP_JS, MARK_LINES_ADD_JS
 from app.flows.ui.base import sel_payload
 from app.flows.ui.page import close_form, dialog_count
 from app.flows.ui.lookup import pick_from_lookup
@@ -118,14 +118,25 @@ QTY_WORDS = ["тоолсон", "тоо ширхэг", "тоо", "хэмжээ", 
 COMPUTED_WORDS = ["үлдэгдэл", "зөрүү", "нийт", "balance", "total"]
 
 
-async def fill_lines(env: "FlowEngine", amount: str = "1") -> dict | None:
+async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] | None = None) -> dict | None:
     """Формын мөрийн grid-д мөр нэмж бөглөнө. Grid байхгүй бол None.
 
     - Эхний lookup багана (Дансны код / Барааны код) — lookup-оос эхний утгыг сонгоно.
     - Дебет + Кредит баганатай (журнал) → 2 мөр: дебет=amount, кредит=amount (тэнцвэртэй).
     - Эс бөгөөс тоо хэмжээ/дүнгийн баганад amount (тооцоолдог үлдэгдэл/зөрүү баганыг хөндөхгүй).
+    accounts: мөр бүрийн lookup-оос сонгох утга (журнал: [дебетийн данс, кредитийн данс]) — заагаагүй бол эхний мөр.
+    Бизнес процессын E2E-д Δ-г тодорхой дансаар шалгахад (хоёр мөр ижил данс бол Δ = 0 болно).
     Буцаах: {"lines": [...тайлбар], "error": ""}"""
     info = await env.page.evaluate(MARK_LINES_ADD_JS, [sel_payload(env)])
+    if not info:
+        # Мөрийн grid формын өөр таб дээр байж болно («Данс» / «Бусад» — Accounting журнал)
+        n = await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), -1])
+        for i in range(min(n, 12)):
+            await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), i])
+            await asyncio.sleep(0.4)
+            info = await env.page.evaluate(MARK_LINES_ADD_JS, [sel_payload(env)])
+            if info:
+                break
     if not info:
         return None
     headers = [h.lower() for h in info["headers"]]
@@ -140,7 +151,8 @@ async def fill_lines(env: "FlowEngine", amount: str = "1") -> dict | None:
     dcol, ccol = col(DEBIT_WORDS), col(CREDIT_WORDS)
     targets = [dcol, ccol] if dcol is not None and ccol is not None else [None]
     lines: list[str] = []
-    for target in targets:
+    for n_line, target in enumerate(targets):
+        want = str((accounts or [])[n_line]) if accounts and n_line < len(accounts) else ""
         if not await env.page.evaluate(MARK_LINES_ADD_JS, [sel_payload(env)]):
             return {"lines": lines, "error": "мөр нэмэх товч дахин олдсонгүй"}
         env._line_hint = ""
@@ -156,9 +168,10 @@ async def fill_lines(env: "FlowEngine", amount: str = "1") -> dict | None:
             await _activate_cell(env, lk["i"])
             if not await env.page.evaluate(MARK_CELL_LOOKUP_JS, lk["i"]):
                 return {"lines": lines, "error": f"'{name(lk['i'])}' нүдний «...» товч олдсонгүй"}
-            picked = await pick_from_lookup(env, f"Мөрийн '{name(lk['i'])}' баганын сонголтын")
+            picked = await pick_from_lookup(env, f"Мөрийн '{name(lk['i'])}' баганын сонголтын", want=want)
             if not picked:
-                return {"lines": lines, "error": f"'{name(lk['i'])}' мөрийн lookup-оос сонгож чадсангүй"}
+                return {"lines": lines, "error": f"'{name(lk['i'])}' мөрийн lookup-оос "
+                                                 + (f"«{want}» " if want else "") + "сонгож чадсангүй"}
             part.append(f"{name(lk['i'])}={picked[:40]}")
             # Сонгосны дараа мөр commit болж болно — шинэ мөрийг сонгосон кодоор (эхний үг) дахин олно
             env._line_hint = picked.split()[0] if picked.split() else ""

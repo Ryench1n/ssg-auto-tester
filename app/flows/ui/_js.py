@@ -411,3 +411,20 @@ PROBE_JS = r"""
   return {url: location.href, tabs, dialogs, menus, inputs: inputs.length, sample, captions: caps};
 }
 """.replace("/*__COMMON__*/", _COMMON_JS)
+
+
+# Формын (дээд цонхны) дотоод табууд: i ≥ 0 — дарна, буцаах нь табын тоо; i = -2 — идэвхтэй табын индекс (-1 = алга)
+FORM_TAB_JS = r"""
+([sel, i]) => {
+  /*__COMMON__*/
+  const root = __scope(sel, 'dialog');
+  if (!root) return i === -2 ? -1 : 0;
+  const tabs = Array.from(root.querySelectorAll('[role=tab], .dxbl-tabs-item')).filter(__vis)
+      .filter((t, k, a) => !a.some(o => o !== t && o.contains(t)));
+  if (i === -2) return tabs.findIndex(t => t.getAttribute('aria-selected') === 'true'
+      || /(^|\s)dxbl-active(\s|$)/.test(typeof t.className === 'string' ? t.className : '')
+      || !!t.querySelector('.dxbl-active'));
+  if (i >= 0 && tabs[i]) tabs[i].click();
+  return tabs.length;
+}
+""".replace("/*__COMMON__*/", _COMMON_JS)

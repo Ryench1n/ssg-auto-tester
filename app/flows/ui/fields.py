@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from app.flows.context import StepFailed
 from app.runner.detectors import snapshot
 from app.flows.ui._js import (
+    FORM_TAB_JS,
     CLICK_OPTION_JS,
     FIND_FIELD_JS,
     MARK_CELL_LOOKUP_JS,
@@ -169,19 +170,6 @@ async def pick_option(env: "FlowEngine", label: str, want: str = "") -> str:
 
 
 # Дээд цонхны (формын) доторх табууд (Анкетийн мэдээлэл / Цалингийн мэдээлэл …): i-г дарна, i=-1 бол тоог буцаана
-FORM_TAB_JS = r"""
-([sel, i]) => {
-  /*__COMMON__*/
-  const root = __scope(sel, 'dialog');
-  if (!root) return 0;
-  const tabs = Array.from(root.querySelectorAll('[role=tab], .dxbl-tabs-item')).filter(__vis)
-      .filter((t, k, a) => !a.some(o => o !== t && o.contains(t)));
-  if (i >= 0 && tabs[i]) tabs[i].click();
-  return tabs.length;
-}
-""".replace("/*__COMMON__*/", _COMMON_JS)
-
-
 # Нээлттэй формын ДОТООД табууд (Анкет / Цалин / Үзүүлэлт …): форм цонх бол түүний дотор, шинэ таб дээрх форм
 # бол идэвхтэй апп-табын агуулга дотор (апп-ын үндсэн таб мөрийг оруулахгүй). i ≥ 0 бол дарна; нэрсийг буцаана.
 FORM_TABS_JS = r"""
@@ -212,11 +200,14 @@ async def form_tabs(env: "FlowEngine", click: int = -1) -> list[str]:
 
 
 async def reveal_field(env: "FlowEngine", label: str) -> dict:
-    """Талбар харагдахгүй бол формын дотоод табуудыг ээлжлэн нээж хайна (таб солиход өгөгдөл хадгалагдана)."""
+    """Талбар харагдахгүй бол формын дотоод табуудыг ээлжлэн нээж хайна (таб солиход өгөгдөл хадгалагдана).
+    Олдохгүй бол АНХНЫ табыг буцааж нээнэ — «Данс оруулна уу» (мөрийн grid «Данс» таб дээр) мэт талбар биш
+    мессежийн дараа «Бусад» таб нээлттэй үлдэж мөрийн grid нуугдаж байсан (Accounting журнал, 2026-10-15)."""
     try:
         return await find_field(env, label)
     except StepFailed:
         pass
+    active = await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), -2])
     n = await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), -1])
     for i in range(min(n, 12)):
         await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), i])
@@ -224,6 +215,9 @@ async def reveal_field(env: "FlowEngine", label: str) -> dict:
             return await find_field(env, label, wait_s=1.0)
         except StepFailed:
             continue
+    if n and active is not None and active >= 0:
+        await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), active])
+        await asyncio.sleep(0.3)
     raise StepFailed(f"'{label}' талбар олдсонгүй")
 
 

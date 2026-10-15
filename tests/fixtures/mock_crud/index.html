@@ -145,6 +145,7 @@ function render() {
   else if (cur && cur.kind === 'dbset') content.appendChild(dbsetView());
   else if (cur && MINI_DEFS[cur.kind]) content.appendChild(miniView(cur.kind));
   else if (cur && cur.kind === 'tb') content.appendChild(tbView());
+  else if (cur && cur.kind === 'acclist') content.appendChild(accListView());
   else content.appendChild($(`<div class="tab-body">${active}</div>`));
   layout.appendChild(content);
   root.appendChild(layout);
@@ -576,10 +577,19 @@ function journalForm(rec, host) {
       <button class="dxbl-popup-header-button">×</button></div>
     <div class="dxbl-toolbar"><button class="dxbl-btn save">Хадгалах & Гарах</button></div>
     <div class="dxbl-fl">${field('Гүйлгээний утга *', 'desc', rec ? rec.desc : '')}${field('Дүн *', 'amount', rec ? rec.amount : '0')}</div>
-    <dxbl-grid class="dxbl-grid lines" style="display:block"><table><thead><tr class="dxbl-grid-header-row">
+    <!-- Бодит SmartApp «Гүйлгээ»: мөрийн grid «Данс» таб дээр, «Бусад» таб дээр нэмэлт талбар -->
+    <div class="dxbl-tabs" role="tablist"><div role="tab" class="dxbl-tabs-item dxbl-active" data-t="acc">Данс</div>
+      <div role="tab" class="dxbl-tabs-item" data-t="oth">Бусад</div></div>
+    <div class="tp-oth" style="display:none">${field('Гэрээ', 'contract', '')}</div>
+    <dxbl-grid class="dxbl-grid lines tp-acc" style="display:block"><table><thead><tr class="dxbl-grid-header-row">
       <th class="dxbl-grid-command-cell"><button class="dxbl-btn sl-grid-command"><span class="dxbl-image fa-regular fa-plus"></span></button></th>
       <th>Дансны код</th><th>Дансны нэр</th><th>Үлдэгдэл</th><th>Дебет</th><th>Кредит</th></tr></thead>
       <tbody></tbody></table></dxbl-grid></div>`);
+  m.querySelectorAll('[role=tab]').forEach(t => t.onclick = () => {
+    m.querySelectorAll('[role=tab]').forEach(x => x.classList.toggle('dxbl-active', x === t));
+    m.querySelector('.tp-acc').style.display = t.dataset.t === 'acc' ? 'block' : 'none';
+    m.querySelector('.tp-oth').style.display = t.dataset.t === 'oth' ? 'block' : 'none';
+  });
   const tb = m.querySelector('.lines tbody');
   const draw = () => {
     tb.innerHTML = '';
@@ -1001,6 +1011,23 @@ function tbData() {
 }
 const fmt = (n) => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 let tbShown = false;
+/* «Дансны жагсаалт» (SmartApp «Данс»: Код, Нэр, Үлдэгдэл) — үлдэгдэл = эхний + журналын (Дебет − Кредит) */
+let alq = '';
+const ACC_BASE = {'1001': 250000, '1101': 900000};
+function accListView() {
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><span class="dxbl-grid-search-box"><input placeholder="Хайх..." value="${esc(alq)}"></span></div>`);
+  const inp = bar.querySelector('input');
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { alq = inp.value; render(); } };
+  v.appendChild(bar);
+  const bal = (code) => (ACC_BASE[code] || 0) + journals.reduce((a, j) =>
+    a + (j.lines || []).filter(l => l.code === code).reduce((b, l) => b + (+l.debit || 0) - (+l.credit || 0), 0), 0);
+  const t = $(`<table class="dxbl-grid"><thead><tr><th>Код</th><th>Нэр</th><th>Үлдэгдэл</th></tr></thead><tbody></tbody></table>`);
+  for (const a of ACCOUNTS.filter(a => !alq || (a.code + ' ' + a.name).includes(alq)))
+    t.querySelector('tbody').appendChild($(`<table><tr role="row"><td>${a.code}</td><td>${esc(a.name)}</td><td>${fmt(bal(a.code))}</td></tr></table>`).querySelector('tr'));
+  v.appendChild(t);
+  return v;
+}
 function tbView() {
   const v = $(`<div class="tab-body"></div>`);
   const bar = $(`<div class="toolbar">

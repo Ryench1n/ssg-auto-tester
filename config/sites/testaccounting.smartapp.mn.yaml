@@ -46,6 +46,54 @@ flows:
         name: "Устгагдсаныг шалгах"
         with: {text: "{group_name}", expect: absent}
 
+  # ---------------------------------------------------------------- Үе 1: Гүйлгээ → Дансны үлдэгдэл (Δ)
+  # Бүрэлдэхүүн бичих шаардлагагүй — журналыг автоматаар бөглөнө (мөр нь «Данс» таб дээр).
+  # Бэлтгэл: доорх e2e.vars-д acc_debit, acc_credit — тест компанийн ХОЁР ӨӨР дансны код.
+  "P1: Гүйлгээ → Дансны үлдэгдэл":
+    type: e2e
+    code: P1
+    description: "ГД-ийн гүйлгээ (дебет / кредит данс заасан, 1₮) → «Данс» жагсаалтын үлдэгдэл Δ → устгахад Δ = 0"
+    steps:
+      - &acc
+        uses: report.read
+        name: "Дансны үлдэгдэл — эхний төлөв"
+        with: &accw
+          menu: "Мастер дата|Ерөнхий дэвтэр|Данс|accountlist"
+          search: true
+          rows:
+            debit: {match: "{acc_debit}", column: "Үлдэгдэл"}
+            credit: {match: "{acc_credit}", column: "Үлдэгдэл"}
+          save_as: b0
+      - uses: crud.auto_create
+        name: "ГД-ийн гүйлгээ бүртгэх (дебет / кредит данс заасан)"
+        with:
+          menu: "Ерөнхий дэвтэр|Жагсаалт|Гүйлгээний жагсаалт|generalledger/journallist"
+          save_as: p1_rec
+          field_as: p1_field
+          try_as: p1_try
+          lines: {debit: "{acc_debit}", credit: "{acc_credit}", amount: "1"}
+      - uses: crud.search
+        name: "Гүйлгээ жагсаалтад харагдах"
+        with: {menu: "Ерөнхий дэвтэр|Жагсаалт|Гүйлгээний жагсаалт|generalledger/journallist", text: "{p1_rec}"}
+      - <<: *acc
+        name: "Дансны үлдэгдэл — гүйлгээний дараа"
+        with: {<<: *accw, save_as: b1}
+      - uses: assert.delta
+        name: "Үлдэгдэл: дебет данс +1, кредит данс −1"
+        with: {before: b0, after: b1, expect: {debit: 1, credit: -1}}
+      - uses: crud.delete
+        name: "Цэвэрлэх: гүйлгээ устгах"
+        always: true
+        with: {menu: "Ерөнхий дэвтэр|Жагсаалт|Гүйлгээний жагсаалт|generalledger/journallist", find: "{p1_rec}"}
+      - <<: *acc
+        name: "Дансны үлдэгдэл — цэвэрлэгээний дараа"
+        always: true
+        with: {<<: *accw, save_as: b2}
+      - uses: assert.delta
+        name: "Цэвэрлэгээ: үлдэгдэл анхны төлөвтөө (Δ = 0)"
+        always: true
+        with: {before: b0, after: b2, expect: {debit: 0, credit: 0}}
+
   # ---------------------------------------------------------------- Бизнес процессын E2E (Үе 2: Order-to-Cash)
   # Бэлтгэл (нэг удаа, тест орчинд):
   #   1. Доорх e2e.vars-ийг тест компанийн утгаар бөглөнө (данс, дүн, тайлант үе).
@@ -111,6 +159,9 @@ flows:
 e2e:
   vars:
     period_from: "2026-01-01"
+    # Үе 1 (P1) — тест компанийн хоёр ӨӨР данс (дансны код, «Данс» жагсаалтын «Код» баганаар):
+    # acc_debit: "…"
+    # acc_credit: "…"
     # acc_receivable: "1201"        # Авлагын данс (Гүйлгээ балансын «Дансны код»)
     # acc_revenue: "5101"           # Борлуулалтын орлогын данс
     # acc_cash: "1001"              # Кассын данс

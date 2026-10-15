@@ -114,6 +114,7 @@ def make_handler(state: CrudState):
             if state.e2e:
                 extra += "{name: 'Борлуулалт', href: '/md/sale', kind: 'sale'},"
                 extra += "{name: 'Гүйлгээ баланс', href: '/rv/trialbalance', kind: 'tb'},"
+                extra += "{name: 'Дансны жагсаалт', href: '/md/acclist', kind: 'acclist'},"
             html = html.replace(b"/*EXTRA_ITEMS*/", extra.encode())
             return self._send(200, html, "text/html; charset=utf-8")
 

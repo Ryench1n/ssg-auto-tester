@@ -9,6 +9,7 @@ config/sites/<host>.yaml-аар тааруулна.
 хэрэглэнэ — бүх нэр энд дахин экспортлогдоно."""
 
 from app.flows.ui._js import (  # noqa: F401
+    FORM_TAB_JS,
     CLICK_OPTION_JS,
     EDIT_ROW_JS,
     FIND_BUTTON_JS,
@@ -101,7 +102,6 @@ from app.flows.ui.fields import (  # noqa: F401
     CLICK_TAB_JS,
     fill_field,
     find_field,
-    FORM_TAB_JS,
     form_tabs,
     FORM_TABS_JS,
     line_column,

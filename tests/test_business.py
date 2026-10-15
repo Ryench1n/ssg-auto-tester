@@ -165,3 +165,52 @@ def test_e2e_scenario_from_components_is_reported(tmp_path):
     text = "\n".join(p.text for p in doc.paragraphs) + "\n".join(c.text for t in doc.tables for r in t.rows for c in r.cells)
     assert "Бизнес процессын E2E «O2L борлуулалт»" in text and "Бизнес процесс: O2L борлуулалт" in text
     assert "Тайлангийн шалгалт (Δ)" in text and "Δ +100,000.00" in text
+
+
+# ---------------------------------------------------------------- Үе 1: журнал → дансны үлдэгдэл (бодит SmartApp-ын бүтэц)
+ACCLIST = "Мастер дата / Бүртгэл / Дансны жагсаалт"
+JOURNAL_KEY = "Мастер дата|Бүртгэл|Журнал|/md/journal"
+
+
+def acc_read(save_as, always=False):
+    return {"uses": "report.read", "name": f"Дансны үлдэгдэл ({save_as})", "always": always,
+            "with": {"menu": ACCLIST, "search": True, "save_as": save_as,
+                     "rows": {"debit": {"match": "{acc_debit}", "column": "Үлдэгдэл"},
+                              "credit": {"match": "{acc_credit}", "column": "Үлдэгдэл"}}}}
+
+
+JOURNAL_TO_BALANCE = [
+    acc_read("b0"),
+    {"uses": "crud.auto_create", "name": "Журналын гүйлгээ (дебет / кредит данс заасан)",
+     "with": {"menu": JOURNAL_KEY, "save_as": "j_rec", "field_as": "j_field", "try_as": "j_try",
+              "lines": {"debit": "{acc_debit}", "credit": "{acc_credit}", "amount": "1"}}},
+    acc_read("b1"),
+    {"uses": "assert.delta", "name": "Гүйлгээ: дебет +1, кредит −1",
+     "with": {"before": "b0", "after": "b1", "expect": {"debit": 1, "credit": -1}}},
+    {"uses": "crud.delete", "name": "Цэвэрлэх: гүйлгээ устгах", "always": True,
+     "with": {"menu": JOURNAL_KEY, "find": "{j_rec}"}},
+    acc_read("b2", always=True),
+    {"uses": "assert.delta", "name": "Цэвэрлэгээ: Δ = 0", "always": True,
+     "with": {"before": "b0", "after": "b2", "expect": {"debit": 0, "credit": 0}}},
+]
+
+
+@e2e
+def test_phase1_journal_to_account_balance(tmp_path):
+    """Үе 1-ийн дуусах шалгуур (SmartApp-ын бодит бүтцээр): ГД-ийн гүйлгээг тодорхой дебет/кредит дансаар
+    үүсгэхэд «Данс» жагсаалтын үлдэгдлийн Δ зөв, устгахад Δ = 0. Журналын мөрийн grid «Данс» таб дээр."""
+    with CrudServer() as srv:
+        srv.state.e2e = True
+        cfg = load_config(srv.url, {**FAST, "flows": {"p1": {"type": "e2e", "steps": JOURNAL_TO_BALANCE}},
+                                    "e2e": {"vars": {"acc_debit": "1001", "acc_credit": "1101"}}})
+        pipe = PipelineRunner("p1", srv.url, cfg, RunOptions(project="T"), tmp_path,
+                              steps=[{"kind": "crud", "flow": "p1"}], headless=True,
+                              on_waiting_login=HumanLogin("admin", PASSWORD))
+        data = asyncio.run(pipe.run())
+    fl = data.flows[0]
+    assert fl["status"] == M.PASS, [(s["index"], s["name"], s["status"], s["message"][:160]) for s in fl["steps"]]
+    b0, b1 = fl["data"]["b0"], fl["data"]["b1"]                  # бодит (бусдын) гүйлгээ ч үлдэгдэлд орно — зөвхөн Δ
+    assert (b1["debit"] - b0["debit"], b1["credit"] - b0["credit"]) == (1.0, -1.0)
+    assert fl["data"]["b2"] == fl["data"]["b0"]
+    notes = " ".join(fl["steps"][1]["notes"])
+    assert "1001" in notes and "1101" in notes                    # мөрүүд заасан дансаар

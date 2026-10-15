@@ -190,7 +190,8 @@ async def auto_create(env, args: dict) -> dict:
     """with: {menu: <цэсний түлхүүр/зам>, save_as: a01_rec, field_as: a01_field,
               try_as: a01_try,      # хадгалахын ӨМНӨ ctx-д бичнэ — Fail болсон ч цэвэрлэгээ хайж устгана
               values_as: a01_vals,  # бөглөсөн утгууд — засварын дараа дахин нээж шалгахад (crud.auto_verify)
-              prefer: {Ажилтан: "<мастер бичлэгийн утга>"}}   # lookup-д энэ бичлэгийг сонгоно"""
+              prefer: {Ажилтан: "<мастер бичлэгийн утга>"},   # lookup-д энэ бичлэгийг сонгоно
+              lines: {debit: "1001", credit: "5101", amount: "1"}}  # мөрийн grid: данс бүрийг заах (E2E Δ)"""
     tag = env.ctx.run_tag
     add, delete = ui.buttons(env, "add"), ui.buttons(env, "delete")
     await ui.ensure_menu(env, args["menu"])
@@ -269,7 +270,7 @@ async def auto_create(env, args: dict) -> dict:
         if args.get("try_as"):
             # Хадгалах оролдлого — «Хадгалах боломжгүй» алдаа гарсан ч бичлэг үүссэн байж болно (цэвэрлэгээ)
             env.ctx.data[args["try_as"]] = values[key]
-        await _save_with_lines(env, form_level, values, picked)
+        await _save_with_lines(env, form_level, values, picked, line_spec=args.get("lines") or {})
     except StepFailed as e:
         # Оношлогоо + screenshot — формыг хаахаас ӨМНӨ (юу харагдаж байсныг хадгална)
         env.run.meta["probe"] = await ui.probe(env)
@@ -312,7 +313,7 @@ async def auto_create(env, args: dict) -> dict:
 
 
 async def _save_with_lines(env, form_level: int, values: dict | None = None, picked: dict | None = None,
-                           max_rounds: int = 8) -> None:
+                           max_rounds: int = 8, line_spec: dict | None = None) -> None:
     """Хадгална. Систем validation анхааруулга буцаавал (аппын алдаа биш) мессежийг уншиж засаад дахин:
 
       1. «<Талбар> оруулна уу / сонгоно уу» → формд тийм талбар байвал бөглөнө/сонгоно
@@ -328,6 +329,7 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
     tag = env.ctx.run_tag
     handled: set[str] = set()
     tried_lines = tried_optional = False
+    line_spec = line_spec or {}
     values = values if values is not None else {}
     picked = picked if picked is not None else {}
     last: StepFailed | None = None
@@ -375,7 +377,8 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
             acted = await _fill_optional(env, form_level, words, values, picked)
         if not acted and not tried_lines:
             tried_lines = True
-            res = await ui.fill_lines(env, "1")
+            res = await ui.fill_lines(env, str(line_spec.get("amount") or "1"),
+                                      [line_spec[k] for k in ("debit", "credit") if line_spec.get(k)] or None)
             if res is not None:
                 env.run.meta["lines"] = res["lines"]
                 if res["error"]:

@@ -115,6 +115,7 @@ async def report_read(env, args: dict) -> dict:
       params: {"Эхлэх огноо": "2026-01-01", "Дуусах огноо": "{today}"}   # шүүлтийн талбарууд
       run: ["Шүүх"]                  # тайланг гаргах товч (заавал биш)
       mode: grid | export            # grid — дэлгэцийн хүснэгт; export — файл татаж задлах (report viewer)
+      search: true                   # grid: мөр бүрийг жагсаалтын хайлтаар шүүж уншина (ж: «Данс» жагсаалт)
       export: ["Файл үүсгэх", "Excel"]  # export горимын товч/цэсийн дараалал (сүүлийнх нь файл татна)
       rows: {avlaga: {match: "1201", column: "Эцсийн үлдэгдэл"}}
       save_as: tb_before             # → ctx[tb_before] = {avlaga: 500000.0, …}
@@ -146,6 +147,17 @@ async def report_read(env, args: dict) -> dict:
         await dl.save_as(str(path))
         headers, rows = read_table_file(path)
         env.note(f"Тайлангийн файл: reports/{path.name} ({len(rows)} мөр)")
+    elif args.get("search"):
+        # Жагсаалт (ж: «Данс» — Код, Үлдэгдэл): мөр бүрийг хайлтаар шүүж уншина (олон хуудастай жагсаалт)
+        headers, rows = [], []
+        for spec in (args.get("rows") or {}).values():
+            await ui.grid_find_settled(env, str(spec["match"]))
+            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env)])
+            if grid and grid["rows"]:
+                headers = grid["headers"]
+                rows += grid["rows"]
+        if not rows:
+            raise StepBlocked("Жагсаалтаас хайсан мөр олдсонгүй — rows.match (дансны код)-ыг шалгана уу", category="tool")
     else:
         grid = None
         for _ in range(int(args.get("wait_s", 10) * 2)):
