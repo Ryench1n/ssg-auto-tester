@@ -24,7 +24,7 @@ DEFAULT_LABELS = {
     "code_labels": ["код", "code", "дугаар"],
     "phone_labels": ["утас", "phone"],
     "email_labels": ["имэйл", "и-мэйл", "email", "e-mail"],
-    "number_labels": ["тоо", "дүн", "үнэ", "хувь", "хэмжээ", "хоног", "amount", "qty"],
+    "number_labels": ["тоо", "дүн", "үнэ", "хувь", "хэмжээ", "хоног", "дараалал", "amount", "qty"],
     # DevExpress DateEdit нь ▾ товчтой тул DOM-оор (slDate г.м. класс таарахгүй үед) combo мэт харагддаг —
     # шошгоор нь огноо гэж таниад сонгохын оронд огноо бичнэ (HR «Төрсөн огноо»)
     "date_labels": ["огноо", "date"],
@@ -33,6 +33,18 @@ DEFAULT_LABELS = {
     # Давтамжит гүйлгээ «Хуваарь оруулна!») — автоматаар хийхгүй, ангилж мэдээлнэ
     "workflow_texts": ["татна уу", "татах", "хуваарь"],
 }
+
+
+def in_columns(label: str, columns: list[str] | None) -> bool:
+    """Талбар жагсаалтад баганатай эсэх: яг ижил, эсвэл багана нь шошгын нэг үг («Гүйлгээний утга» ↔ «Утга»),
+    эсвэл шошго нь баганын нэг үг. Жагсаалтын хайлт зөвхөн харагдах баганаар хайдаг."""
+    lab = re.sub(r"\s+", " ", label or "").strip().lower()
+    words = set(lab.split())
+    for c in columns or []:
+        col = re.sub(r"\s+", " ", c or "").strip().lower()
+        if col and (col == lab or (len(col) >= 3 and col in words) or (len(lab) >= 3 and lab in col.split())):
+            return True
+    return False
 
 
 def validation_kind(message: str, auto_cfg: dict | None = None) -> str:
@@ -115,9 +127,8 @@ def plan_values(fields: list[dict], tag: str, auto_cfg: dict, uid: str = "",
     texts = [f for f in empty if is_text(f) and not is_date_field(f, words)]
     # Жагсаалтын хайлт зөвхөн харагдах багана дээр ажилладаг — түлхүүр нь жагсаалтад баганатай талбар байх ёстой
     # (Accounting «Бараа материалын хүлээн авалтын акт»: «Гүйлгээний утга» баганагүй → хайлтаар олдоогүй)
-    cols = {re.sub(r"\s+", " ", c).strip().lower() for c in columns or []}
     # тоо/дүн (ж: журналын «Дүн» нь баганатай ч мөрийг давтагдашгүй тодорхойлохгүй) түлхүүр болохгүй
-    shown = [f for f in texts if f["label"].strip().lower() in cols and not _match(f["label"], num_w)]
+    shown = [f for f in texts if in_columns(f["label"], columns) and not _match(f["label"], num_w)]
     # Түлхүүр: (жагсаалтад харагдах) заавал нэр/утга → нэр/утга → заавал текст → код → эхний текст
     key_f = (next((f for f in shown if f["required"] and _match(f["label"], key_w)), None)
              or next((f for f in shown if _match(f["label"], key_w)), None)
@@ -215,6 +226,10 @@ async def auto_create(env, args: dict) -> dict:
                               "— энэ цэсэд YAML flow бичнэ үү (ноорог тайланд)", skip_flow=True)
         if not key:
             raise StepBlocked("run_tag бичих текст талбар олдсонгүй", skip_flow=True)
+        if args.get("columns") and not in_columns(key, args["columns"]):
+            raise StepBlocked(f"Түлхүүр талбар «{key}» жагсаалтын баганад алга ({', '.join((args.get('columns') or [])[:8])}) — "
+                              "бичлэгийг хайж олох, цэвэрлэх боломжгүй тул үүсгэсэнгүй; YAML flow бичнэ үү",
+                              skip_flow=True, category="tool")
         form_level = await ui.dialog_count(env)
         words = {**DEFAULT_LABELS, **{k: v for k, v in (ui.fcfg(env).get("auto") or {}).items() if v}}
         dates = {f["label"] for f in fields if is_date_field(f, words)}

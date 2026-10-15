@@ -130,11 +130,17 @@ def form_candidates(results) -> list[dict]:
 def crud_candidates(results) -> list[dict]:
     """Smoke-ийн үр дүнгээс автомат CRUD хийж болох (crud=full, таб нээгдсэн) цэсүүд."""
     out = []
+    names = {r.item.name.strip().lower() for r in results}
     for r in results:
         c = r.caps or {}
         cols = {str(x).lower() for x in c.get("columns") or []}
         if "бараагаар" in r.item.name.lower() and {"барааны код", "барааны нэр"} & cols:
             continue      # мөрийн (бараагаар) жагсаалт — ижил баримтын толгойн жагсаалт тусдаа цэс
+        m = re.match(r"^(.*?)\s*/[^/]+/\s*$", r.item.name.strip())
+        if m and m.group(1).strip().lower() in names:
+            # «… /ажилтнаар/», «/хөрөнгөөр/», «/дэвсгэртээр/» — мөр/задаргаагаар харуулдаг хувилбар: толгой
+            # баримтыг хадгалахад тэнд харагдахгүй (HR, Accounting 2026-10-15); үндсэн жагсаалт нь тусдаа цэс
+            continue
         if c.get("crud") == "full" and r.tab_opened:
             out.append({"key": r.item.key, "module": r.item.module, "folder": r.item.folder,
                         "name": r.item.name, "path": menu_path(r.item), "status": r.status,

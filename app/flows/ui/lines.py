@@ -170,7 +170,8 @@ async def fill_lines(env: "FlowEngine", amount: str = "1") -> dict | None:
         num = target if target is not None else (col(QTY_WORDS, numeric)
                                                  if col(QTY_WORDS, numeric) is not None
                                                  else next((i for i in sorted(numeric)
-                                                            if not any(w in headers[i] for w in COMPUTED_WORDS)), None))
+                                                            if not any(w in (headers[i] if i < len(headers) else "")
+                                                                       for w in COMPUTED_WORDS)), None))
         if num is not None:
             level = await dialog_count(env)
             if not await _fill_cell(env, num, amount):

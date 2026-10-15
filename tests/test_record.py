@@ -287,7 +287,8 @@ def test_record_replay_rich_cases(recdir, tmp_path):
         uses = [(s["uses"], s["with"]) for s in spec["steps"]]
         print(*uses, sep="\n")
         assert ("ui.click", {"icon": "fa-plus-circle", "scope": "page"}) in uses
-        assert ("ui.fill", {"field": "Огноо", "value": "2026-10-15"}) in uses
+        # календарийн 15-ны өдөр — өнөөдөр 15 бол бичигч {today} болгоно (өдрөөс хамаарахгүй шалгалт)
+        assert any(u == ("ui.fill", {"field": "Огноо", "value": v}) for v in ("2026-10-15", "{today}") for u in uses)
         assert ("ui.row", {"text": "Дорж", "open": False, "dialog": True}) in uses
         assert ("ui.fill", {"field": "Нэр", "value": "{run_tag} Шинэ ажил"}) in uses
         assert ("ui.key", {"field": "Нэр", "key": "Enter"}) in uses

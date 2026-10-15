@@ -61,6 +61,10 @@ def test_master_for():
     assert master_for("Харилцагч", keys) == k("Харилцагч")        # яг ижил > «… бүлэг»
     assert master_for("Харилцагч", [k("Харилцагчийн бүлэг")]) is None   # туслах ангилал мастер биш
     assert master_for("Байршил", keys) is None
+    # HR 2026-10-15: «Ажилтан» lookup-д «Ажилтны үзүүлэлт»-ийг мастер гэж сонгосон — өөр өгөгдөл
+    assert master_for("Ажилтан", [k("Ажилтны үзүүлэлт"), k("Ажилтны жагсаалт")]) == k("Ажилтны жагсаалт")
+    assert master_for("Ажилтан", [k("Ажилтны үзүүлэлт")]) is None
+    assert master_for("Сургалтын байгуулга", [k("Сургалтын байгууллага")]) == k("Сургалтын байгууллага")
 
 
 def test_saved_value_comparison():
@@ -307,3 +311,37 @@ def test_validation_titled_dialog_with_error_word_is_warning():
         assert aio.run(ui_wait.popup_problems(Env())) == ([], [])     # асуулт
     finally:
         ui_wait.snapshot = orig
+
+
+
+def test_variant_lists_are_not_candidates():
+    """«… /дэвсгэртээр/», «/хөрөнгөөр/», «/ажилтнаар/» — үндсэн жагсаалт нь тусдаа цэс бол хасна (Accounting A13, A171)."""
+    from types import SimpleNamespace as NS
+    from app.models import MenuItem
+    from app.runner.capabilities import crud_candidates
+    mk = lambda name: NS(item=MenuItem("Систем", "Маягт", name, "/x/" + name), tab_opened=True, status="Pass",
+                         caps={"crud": "full", "columns": ["№", "Огноо"], "buttons": []})
+    names = [c["name"] for c in crud_candidates([mk("Тушаалын жагсаалт"), mk("Тушаалын жагсаалт /ажилтнаар/"),
+                                                 mk("Ганц жагсаалт /тусгай/")])]
+    assert names == ["Тушаалын жагсаалт", "Ганц жагсаалт /тусгай/"]     # үндсэнгүй хувилбар үлдэнэ
+
+
+@e2e
+def test_key_not_in_list_columns_is_not_created(tmp_path):
+    """Түлхүүр талбар жагсаалтын баганад алга бол бичлэг ҮҮСГЭХГҮЙ — олж цэвэрлэх боломжгүй (Accounting A19, HR A148)."""
+    from app.pipeline.stages import auto_flow_spec
+    with CrudServer() as srv:
+        srv.state.deps = True
+        spec = auto_flow_spec(EMP, "a01", columns=["Төрсөн огноо"])
+        pipe, cfg = make_pipe(srv, tmp_path, [{"kind": "crud", "flow": "x"}], [], extra={"flows": {"x": spec}})
+        d = asyncio.run(pipe.run())
+    st = d.flows[0]["steps"][0]
+    assert st["status"] == M.BLOCKED and "баганад алга" in st["message"] and st["category"] == "tool", st
+    assert not d.flows[0]["data"]
+
+
+def test_fill_lines_header_shorter_than_cells():
+    """IndexError: толгойн нүд мөрийн нүднээс цөөн (Accounting «Клиринг жагсаалт /хөрөнгөөр/»)."""
+    import inspect
+    from app.flows.ui import lines
+    assert "i < len(headers)" in inspect.getsource(lines.fill_lines)

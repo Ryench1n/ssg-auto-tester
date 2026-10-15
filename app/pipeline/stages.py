@@ -294,8 +294,8 @@ def master_teardown_spec(key: str, prefix: str) -> dict:
     ]}
 
 
-# Lookup-ийн шошго ийм үгээр төгссөн цэс нь мастер биш туслах ангилал (ж: «Харилцагчийн бүлэг»)
-_NOT_MASTER = ("бүлэг", "төрөл", "ангилал", "загвар", "тохиргоо")
+# Мастер цэсийн нэрэнд lookup-ийн шошгоос гадна байж болох ерөнхий үгс
+_MASTER_EXTRA = {"жагсаалт", "бүртгэл", "лавлах"}
 
 
 def master_for(label: str, keys: list[str]) -> str | None:
@@ -304,18 +304,25 @@ def master_for(label: str, keys: list[str]) -> str | None:
     lab = (label or "").strip().lower()
     if len(lab) < 3:
         return None
-    stem = lab[:max(4, len(lab) - 2)]
+    lw = lab.split()
     best = None
     for k in keys:
         try:
             name = menu_from_key(k).name.strip().lower()
         except ValueError:
             continue
-        rest = name[len(lab):] if name.startswith(lab) else name[len(stem):]
-        if any(w in rest for w in _NOT_MASTER) and not any(w in lab for w in _NOT_MASTER):
+        nw = name.split()
+        if len(nw) < len(lw):
             continue
-        score = 3 if name == lab else 2 if name.startswith(lab) else 1 if len(lab) >= 5 and name.startswith(stem) else 0
-        if score and (best is None or (score, -len(name)) > best[0]):
+        # Үг бүр язгуураараа таарна (Ажилтан ↔ Ажилтны, байгуулга ↔ байгууллага); илүү үг нь зөвхөн «жагсаалт»
+        # мэт ерөнхий үг — «Ажилтны үзүүлэлт», «Харилцагчийн бүлэг» нь өөр өгөгдөл
+        stems = [w[:max(4, len(w) - 2)] if len(w) >= 5 else w for w in lw]
+        if not all(n.startswith(st) for n, st in zip(nw, stems)):
+            continue
+        if any(w not in _MASTER_EXTRA for w in nw[len(lw):]):
+            continue
+        score = 3 if name == lab else 2 if name.startswith(lab) else 1
+        if best is None or (score, -len(name)) > best[0]:
             best = ((score, -len(name)), k)
     return best[1] if best else None
 

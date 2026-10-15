@@ -214,7 +214,7 @@ flow:
     code_labels: ["код", "code", "дугаар"]
     phone_labels: ["утас", "phone"]
     email_labels: ["имэйл", "и-мэйл", "email", "e-mail"]
-    number_labels: ["тоо", "дүн", "үнэ", "хувь", "хэмжээ", "хоног", "amount", "qty"]
+    number_labels: ["тоо", "дүн", "үнэ", "хувь", "хэмжээ", "хоног", "дараалал", "amount", "qty"]
     # DateEdit (▾ товчтой) DOM-оор танигдахгүй бол шошгоор огноо гэж үзнэ; төрсөн огноо → 30 жилийн өмнө
     date_labels: ["огноо", "date"]
     birth_labels: ["төрсөн", "birth"]
