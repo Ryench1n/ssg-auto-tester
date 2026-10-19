@@ -326,3 +326,11 @@ def test_explicit_values_and_optional_prefer_follow_form_order():
         {"Харилцагч": "T11", "Данс": "авлага"})
     assert values == {"Гүйлгээний утга": "T S14", "Худалдах үнэ": "1000", "Борлуулах бараа эсэх": True}
     assert picks == ["Харилцагч", "Данс"] and skipped == ["Байхгүй"] and unresolved == []
+
+
+def test_want_matches_plain_strict_and_pattern():
+    from app.flows.steps.auto import want_matches
+    assert want_matches("Үйлчилгээ", "2 Үйлчилгээ") and not want_matches("Үйлчилгээ", "Бараа материал")
+    assert want_matches("=SSG01", "SSG01 тест") and not want_matches("=SSG01", "C-0001 Бодит")
+    assert want_matches("авлага&!валют", "120101 Дансны авлага MNT")
+    assert not want_matches("авлага&!валют", "120501 Валютын авлага")

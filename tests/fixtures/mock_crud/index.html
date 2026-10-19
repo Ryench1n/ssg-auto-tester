@@ -1127,7 +1127,8 @@ MINI_DEFS.custm = {cols: ['Код', 'Нэр', 'Авлагын үлдэгдэл']
   rowVals: (r) => [r.code, r.name, fmt(custBalances().filter(b => b.code === r.code).reduce((s, b) => s + b.end, 0))],
   inUse: (r) => usedIn(d => d.cust === r.code)};
 MINI_DEFS.itemm = {cols: ['Код', 'Нэр', 'Худалдах үнэ'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'},
-    {label: 'Төрөл *', name: 'type', kind: 'lookup', src: 'itemtypes'}, {label: 'Худалдах үнэ', name: 'price'},
+    // testaccounting: «Төрөл» анхдагчаар «Бараа» бөглөгдсөн байдаг
+    {label: 'Төрөл *', name: 'type', kind: 'lookup', src: 'itemtypes', def: 'Бараа'}, {label: 'Худалдах үнэ', name: 'price'},
     {label: 'Борлуулах бараа эсэх', name: 'sell', kind: 'check'}],
   validate: (v) => !v.code ? 'Код оруулна уу' : !v.name ? 'Нэр оруулна уу' : !v.type ? 'Төрөл сонгоно уу' : '',
   rowVals: (r) => [r.code, r.name, r.price || ''],
@@ -1333,7 +1334,7 @@ function miniView(kind) {
 function miniForm(kind, rec) {
   const d = MINI_DEFS[kind], st = miniState(kind);
   const body = d.fields.map(f => {
-    const val = esc(rec ? rec[f.name] || '' : '');
+    const val = esc(rec ? rec[f.name] || '' : (f.def || ''));
     if (f.kind === 'datecombo') return `<div class="dxbl-fl-item"><label class="dxbl-fl-cpt">${f.label}:</label><div class="dxbl-fl-ctrl">
         <span class="dxbl-combobox"><input name="${f.name}" role="combobox" value="${val}"><button class="dxbl-btn dd">▾</button></span></div></div>`;
     if (f.kind === 'check') return `<div class="dxbl-fl-item"><label class="dxbl-fl-cpt">${f.label}:</label><div class="dxbl-fl-ctrl">

@@ -165,6 +165,15 @@ def plan_values(fields: list[dict], tag: str, auto_cfg: dict, uid: str = "",
     return values, (key_f["label"] if key_f else ""), picks, unresolved
 
 
+def want_matches(want: str, text: str) -> bool:
+    """prefer-ийн утга (энгийн, «=X», «a&!b» нөхцөл) одоогийн утгатай таарах эсэх."""
+    w, t = want.lstrip("=").strip().lower(), (text or "").lower()
+    if "&" in w or w.startswith("!"):
+        toks = [x.strip() for x in w.split("&") if x.strip()]
+        return all(x in t for x in toks if not x.startswith("!")) and not any(x[1:] in t for x in toks if x.startswith("!"))
+    return w in t
+
+
 def _field_for(fields: list[dict], label: str) -> dict | None:
     n = re.sub(r"\s+", " ", label.replace("*", "")).strip().lower()
     norm = lambda f: re.sub(r"\s+", " ", (f.get("label") or "").replace("*", "")).strip().lower()
@@ -302,7 +311,8 @@ async def auto_create(env, args: dict) -> dict:
             info = await ui.find_field(env, label)
             current = (info.get("value") or "").strip()
             mine = str(prefer_by.get(label) or "")
-            if current and not (tag in mine and tag not in current):   # тестийн бичлэг заасан бол анхдагчийг солино
+            # Анхдагч утгатай талбар: сценари өөр утга заасан бол солино (ж: барааны «Төрөл» анхдагч «Бараа материал»)
+            if current and (not mine or want_matches(mine, current)):
                 # Өмнөх сонголтоор систем автоматаар бөглөсөн (ж: Дансны төрөл → Дансны бүлэг) — хөндөхгүй
                 picked[label] = current
                 env.run.meta["fields"][label] = f"(автоматаар бөглөгдсөн: {current[:60]})"
@@ -330,7 +340,8 @@ async def auto_create(env, args: dict) -> dict:
         if args.get("try_as"):
             # Хадгалах оролдлого — «Хадгалах боломжгүй» алдаа гарсан ч бичлэг үүссэн байж болно (цэвэрлэгээ)
             env.ctx.data[args["try_as"]] = values[key]
-        await _save_with_lines(env, form_level, values, picked, line_spec=args.get("lines") or {})
+        keep = {(_field_for(fields, str(k)) or {}).get("label", k) for k in [*(args.get("prefer") or {}), *(args.get("values") or {})]}
+        await _save_with_lines(env, form_level, values, picked, line_spec=args.get("lines") or {}, keep=keep)
     except StepFailed as e:
         # Оношлогоо + screenshot — формыг хаахаас ӨМНӨ (юу харагдаж байсныг хадгална)
         env.run.meta["probe"] = await ui.probe(env)
@@ -373,7 +384,7 @@ async def auto_create(env, args: dict) -> dict:
 
 
 async def _save_with_lines(env, form_level: int, values: dict | None = None, picked: dict | None = None,
-                           max_rounds: int = 8, line_spec: dict | None = None) -> None:
+                           max_rounds: int = 8, line_spec: dict | None = None, keep: set | None = None) -> None:
     """Хадгална. Систем validation анхааруулга буцаавал (аппын алдаа биш) мессежийг уншиж засаад дахин:
 
       1. «<Талбар> оруулна уу / сонгоно уу» → формд тийм талбар байвал бөглөнө/сонгоно
@@ -388,6 +399,7 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
     words = {**DEFAULT_LABELS, **{k: v for k, v in (ui.fcfg(env).get("auto") or {}).items() if v}}
     tag = env.ctx.run_tag
     handled: set[str] = set()
+    filled_targets: list[str] = []
     tried_lines = tried_optional = False
     line_spec = line_spec or {}
     values = values if values is not None else {}
@@ -415,6 +427,12 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
             except StepFailed:
                 continue                                # талбар биш (мөрийн grid г.м.)
             if info["readonly"] and not info.get("combo"):
+                continue
+            cur = (info.get("value") or "").strip()
+            if label in (keep or set()) and cur and not re.fullmatch(r"0+([.,]0+)?", cur):
+                # Сценарийн заасан талбар бөглөгдсөн (ж: авлагын «Данс») — анхааруулга өөр (мөр/таб)
+                # талбарын тухай; ДАРЖ БИЧИХГҮЙ (testaccounting борлуулалт: 120101-ийг 00099901-ээр сольж байсан)
+                filled_targets.append(label)
                 continue
             if is_date_field({**info, "label": label}, words):
                 value = date_value(label, await ui.scan_form(env, wait_s=0), words)
@@ -453,8 +471,23 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
                 env.note("Мөр нэмсэн: " + " | ".join(res["lines"]))
                 acted = True
         if not acted:
+            await _survey_before_giving_up(env, filled_targets)
             raise last
+    await _survey_before_giving_up(env, filled_targets)
     raise last
+
+
+async def _survey_before_giving_up(env, filled_targets: list[str]) -> None:
+    """«<Талбар> сонгогдоогүй» гэсэн ч тэр талбар бөглөгдсөн — аль табын юу дутуу байгааг тайланд (калибровк)."""
+    if not filled_targets:
+        return
+    try:
+        flow = re.sub(r"[^\w-]+", "_", getattr(env, "flow_name", ""), flags=re.U).strip("_")[:30]
+        tabs = await ui.survey_tabs(env, shot_prefix=f"survey-{flow}")
+        env.note(f"«{', '.join(dict.fromkeys(filled_targets))}» бөглөгдсөн байхад анхааруулга давтагдав — табууд: "
+                 + " | ".join(tabs))
+    except Exception as e:                                   # оношлогоо — үндсэн алдааг дарахгүй
+        env.note(f"Табын оношлогоо амжилтгүй: {e}")
 
 
 async def _fill_optional(env, form_level: int, words: dict, values: dict, picked: dict) -> bool:

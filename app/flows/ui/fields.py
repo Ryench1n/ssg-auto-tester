@@ -209,6 +209,32 @@ async def form_tabs(env: "FlowEngine", click: int = -1) -> list[str]:
         return []
 
 
+async def survey_tabs(env: "FlowEngine", shot_prefix: str = "") -> list[str]:
+    """Оношлогоо: формын дотоод таб бүрийг нээж хоосон талбаруудыг жагсаана (+ screenshot) — ж. «Данс сонгогдоогүй»
+    гарсан ч толгойн «Данс» бөглөгдсөн үед аль табын аль талбар дутуу байгааг харуулна. Эхний табаа сэргээнэ."""
+    from app.flows.ui.page import scan_form
+    out: list[str] = []
+    names = await form_tabs(env)
+    active = await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), -2])
+    for i, name in enumerate(names[:10] or [""]):
+        if names:
+            await form_tabs(env, i)
+            await asyncio.sleep(0.6)
+        fields = await scan_form(env, wait_s=0)
+        empty = [f["label"] + ("*" if f.get("required") else "") for f in fields
+                 if not (f.get("value") or "").strip() and f.get("type") not in ("checkbox", "radio")]
+        out.append(f"[{name or 'форм'}] хоосон: {', '.join(empty) or '—'}")
+        if shot_prefix:
+            try:
+                await env.page.screenshot(path=str(env.run_dir / "shots" / f"{shot_prefix}-tab{i}.png"), timeout=5000)
+            except Exception:
+                pass
+    if names and active is not None and active >= 0:
+        await form_tabs(env, active)
+        await asyncio.sleep(0.3)
+    return out
+
+
 async def reveal_field(env: "FlowEngine", label: str) -> dict:
     """Талбар харагдахгүй бол формын дотоод табуудыг ээлжлэн нээж хайна (таб солиход өгөгдөл хадгалагдана).
     Олдохгүй бол АНХНЫ табыг буцааж нээнэ — «Данс оруулна уу» (мөрийн grid «Данс» таб дээр) мэт талбар биш

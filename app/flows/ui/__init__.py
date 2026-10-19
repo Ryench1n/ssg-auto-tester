@@ -112,6 +112,7 @@ from app.flows.ui.fields import (  # noqa: F401
     pick_option,
     read_field,
     reveal_field,
+    survey_tabs,
     save_form,
 )
 from app.flows.ui.grid import (  # noqa: F401
