@@ -373,7 +373,9 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
                 env.note(f"Анхааруулгын дагуу бөглөв: {label}={value[:40]}")
                 (picked if shown.startswith("TODO") else values)[label] = value
                 acted = True
-        if not acted and not tried_optional and not ui.validation_targets(message, titles):
+        # Мөр бөглөсний дараах анхааруулга мөрийн тухай (ж: «Уг дансны төрлөөр кредит бичилт…») — заавал биш толгойн
+        # талбар (НӨАТ, мөнгөн гүйлгээ …) бөглөвөл шинэ алдаа үүсгэнэ (testaccounting журнал, 2026-10-19)
+        if not acted and not tried_optional and not tried_lines and not ui.validation_targets(message, titles):
             tried_optional = True
             acted = await _fill_optional(env, form_level, words, values, picked)
         if not acted and not tried_lines:
@@ -400,7 +402,7 @@ async def _fill_optional(env, form_level: int, words: dict, values: dict, picked
         label = f["label"]
         if f["required"] or label in values or label in picked or (f.get("value") or "").strip():
             continue
-        if _match(label, ["загвар", "template"]):
+        if _match(label, ["загвар", "template", "нөат", "татвар", "vat"]):
             # Загвар сонгоход форм бүхэлдээ (утга, мөрүүд) загвараар солигддог — testaccounting журнал: «Цалингийн
             # гүйлгээ» загвар 2 мөрийг 13 мөрөөр сольж, «Гүйлгээний утга»-ыг дарж бичсэн (2026-10-19)
             continue

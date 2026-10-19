@@ -247,4 +247,7 @@ def test_phase1_site_scenario_is_self_contained(tmp_path):
     # «Гүйлгээний загвар» сонгож мөрүүдийг дарж бичсэн — аль аль нь давтагдахгүй
     acc_notes = " ".join(by["Тест данс үүсгэх (дебет)"]["notes"])
     assert "7001 Бусад зардал" in acc_notes and "Туслахтай" not in acc_notes, acc_notes      # НӨАТ ч биш
+    # зардлын төрөл зөвхөн дебет — кредит данс орлогын төрөл (testaccounting 2026-10-19)
+    assert "5101 Бусад орлого" in " ".join(by["Тест данс үүсгэх (кредит)"]["notes"])
+    assert "НӨАТ=" not in " ".join(fl["steps"][3]["notes"])                 # толгойн НӨАТ бөглөөгүй
     assert "Гүйлгээний загвар" not in " ".join(fl["steps"][3]["notes"])
