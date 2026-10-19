@@ -1231,6 +1231,11 @@ function cashForm(kind) {
       lines: [{code: acc, name: '', debit: income ? amt : 0, credit: income ? 0 : amt, cust},
               {code: '1201', name: 'Дансны авлага', debit: income ? 0 : amt, credit: income ? amt : 0, cust}]});
     m.remove(); render();
+    // testaccounting: хадгалсны дараа баримтын хэвлэх цонх (report viewer) автоматаар нээгдэнэ
+    const pv = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Хэвлэх
+        <button class="dxbl-popup-header-button">×</button></div><div>Select page</div><div>Select Zoom</div></div>`);
+    pv.querySelector('.dxbl-popup-header-button').onclick = () => pv.remove();
+    document.body.appendChild(pv);
   };
   document.body.appendChild(m);
 }

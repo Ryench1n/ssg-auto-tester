@@ -18,7 +18,7 @@ from app.flows.ui._js import (
 )
 from app.flows.ui.base import fcfg, sel_payload
 from app.flows.ui.wait import popup_problems, raise_on_problems, settle
-from app.flows.ui.page import click_button, dialog_count
+from app.flows.ui.page import click_button, close_form, dialog_count
 from app.flows.ui.lookup import pick_from_lookup
 from app.flows.ui.lines import _activate_cell, _edit_row
 
@@ -357,6 +357,12 @@ async def read_field(env: "FlowEngine", label: str) -> str:
 
 
 
+def is_print_preview(dialog_text: str) -> bool:
+    """DevExpress report viewer-ийн хэвлэх цонх («Хэвлэх» + «Select page / Select Zoom»)."""
+    t = dialog_text or ""
+    return bool(re.search(r"Select (page|Zoom)", t, re.I)) or (t.strip().startswith(("Хэвлэх", "Print")) and len(t) < 120)
+
+
 async def save_form(env: "FlowEngine", save_texts: list[str]) -> None:
     """Хадгалах дарж, алдаагүй хадгалагдсаныг (форм хаагдсан эсвэл тайван болсон) баталгаажуулна."""
     before = await dialog_count(env)
@@ -373,9 +379,16 @@ async def save_form(env: "FlowEngine", save_texts: list[str]) -> None:
         calm_since = (calm_since or time.monotonic()) if ok else None
         if ok and (env.col.quiet_for(fcfg(env).get("settle_ms", 500) / 1000)
                    or time.monotonic() - calm_since >= cap):
-            if before == 0 or len(st.dialogs) < before:
+            forms = [d for d in st.dialogs if not is_print_preview(d)]
+            if before == 0 or len(forms) < before:
                 await asyncio.sleep(0.2)
                 await raise_on_problems(env, "Хадгалахад")
+                if len(forms) < len(st.dialogs):
+                    # Хадгалсны дараа апп баримтын хэвлэх цонхыг өөрөө нээсэн (testaccounting кассын орлогын ордер,
+                    # 2026-10-19) — хадгалалт амжилттай; хэвлэхгүйгээр хаана
+                    await close_form(env, keep=len(forms))
+                    if hasattr(env, "note"):
+                        env.note("Хадгалсны дараа хэвлэх цонх автоматаар нээгдсэн — хаав")
                 return
         await asyncio.sleep(0.15)
     raise StepFailed(f"Хадгалсны дараа форм {timeout:.0f} сек-д хаагдсангүй")
