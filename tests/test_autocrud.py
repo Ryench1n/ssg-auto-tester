@@ -4,7 +4,7 @@
   Бараа     — CRUD товчгүй → crud=none (нэр дэвшихгүй)
   Ангилал   — заавал огноо (DateEdit) бөглөнө; lookup нээхэд системийн алдаа → Fail (bug)
   Бүлэг     — «Шинэ» формыг ШИНЭ ТАБ дээр нээнэ, FormLayout caption-гүй (<span> шошго) → Pass
-  Гүйлгээ   — «Шинэ» нь төрөл сонгох dropdown → алгасна (сонголт хийхгүй)
+  Гүйлгээ   — «Шинэ» нь төрөл сонгох dropdown → эхний аюулгүй төрлийг сонгоно
 """
 import asyncio
 import datetime
@@ -257,14 +257,16 @@ def test_journal_with_lines_full_crud(after_smoke):
 
 
 @e2e
-def test_dropdown_new_button_is_skipped(after_smoke):
+def test_dropdown_new_button_picks_first_safe_type(after_smoke):
+    """«Шинэ» → төрөл сонгох цэс: нийлмэл «Орлого Зарлага» ба хориотой «Баримт устгах»-ыг алгасаж эхний аюулгүй
+    төрлийг («Орлого») сонгоод бүрэн CRUD хийнэ (өмнө нь Blocked — testaccounting-д 21 цэс). Сөрөг (хоосон хадгалах)
+    тест төрөл сонгох цэстэй формд хамаарахгүй (N/A) хэвээр."""
     t = after_smoke["data"].flows[3]
-    assert t["meta"]["opened"] == "menu" and "Орлого" in t["meta"]["skipped"]
-    assert t["meta"]["probe"]["menus"] and t["steps"][0]["screenshot"]
-    # Бүртгэл алгассан тул CRUD алхмууд Blocked; цэвэрлэгээ (хадгалаагүй — өгөгдөлгүй) ба сөрөг тест (төрөл сонгох
-    # цэс) always тул ажиллаад «хамаарахгүй» (N/A)
-    assert [s["status"] for s in t["steps"]] == [M.BLOCKED] * 8
-    assert [s["category"] for s in t["steps"][6:]] == ["na", "na"]
+    assert t["meta"]["type_item"] == "Орлого", t["meta"]
+    assert [s["status"] for s in t["steps"][:7]] == [M.PASS] * 7, [(s["name"], s["message"][:120]) for s in t["steps"]]
+    assert "төрөл «Орлого» сонгов" in " ".join(t["steps"][0]["notes"])
+    assert t["steps"][7]["category"] == "na"
+    assert not after_smoke["srv"].state.untagged_touched           # «Баримт устгах» хэзээ ч дарагдаагүй
 
 
 @e2e
@@ -297,10 +299,10 @@ def test_unfillable_menu_is_skipped_not_bug(after_smoke):
     s = after_smoke["summary"]
     ids = [t["id"] for t in s["tcs"]]
     assert any(i.startswith("TC-FLOW-A01-") for i in ids) and any(i.startswith("TC-FLOW-A03-") for i in ids)
-    assert not any(i.startswith("TC-FLOW-A04-") for i in ids)          # dropdown «Шинэ» — алгассан
+    # dropdown «Шинэ» (A04) — одоо төрөл сонгож шалгагдсан (TC-тэй), bug үүсгээгүй
+    assert any(i.startswith("TC-FLOW-A04-") for i in ids)
     assert not any("A04" in ",".join(b["tcs"]) for b in s["bugs"])
     assert s["decision"] != "GO" or s["stats"]["blocked"] == 0
-    assert any(f["skipped"] for f in s["flows"])
 
 
 @e2e
@@ -311,7 +313,7 @@ def test_yaml_draft_generated_and_loadable(after_smoke, tmp_path):
     flows = doc["flows"]
     assert len(flows) == 6 and {"auto_khariltsagch", "auto_angilal"} <= set(flows), list(flows)
     txn = next(f for f in flows.values() if "Гүйлгээ" in f["description"])
-    assert txn["diagnostics"]["opened"] == "menu" and "Орлого" in " ".join(txn["diagnostics"]["menus"])
+    assert txn["steps"][1]["with"]["add_menu"] == "Орлого"          # ноорог төрөл сонгох цэсийг давтана
     create = flows["auto_khariltsagch"]["steps"][1]
     assert create["uses"] == "crud.create" and create["with"]["fields"] == {"Нэр": "{run_tag} A01 автомат тест"}
     assert create["with"]["menu"] == "Мастер дата / Бүртгэл / Харилцагч"

@@ -41,7 +41,8 @@ def draft_flows(flows: list[dict]) -> dict:
         steps = [
             {"uses": "auth.login", "name": "Нэвтрэх"},
             {"uses": "crud.create", "name": "Бүртгэх", "with": {
-                "menu": menu, "fields": fields, "key": key, "save_as": "record"}},
+                "menu": menu, "fields": fields, "key": key, "save_as": "record",
+                **({"add_menu": meta["type_item"]} if meta.get("type_item") else {})}},
             {"uses": "crud.search", "name": "Бүртгэснээ хайх", "with": {"text": "{record}"}},
         ]
         if meta.get("edit_value"):

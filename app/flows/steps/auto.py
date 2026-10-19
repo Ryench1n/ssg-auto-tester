@@ -254,20 +254,29 @@ async def auto_create(env, args: dict) -> dict:
     opened, new_tabs, menu_items = await wait_opened(env, before, tabs_before)
     env.run.meta["opened"] = opened or "nothing"
     try:
-        if opened == "menu" and args.get("add_menu"):
-            want = str(args["add_menu"])
-            item = next((m for m in menu_items if m.strip() == want), None) or \
-                next((m for m in menu_items if want.lower() in m.lower()), None)
-            safe, _ = ui.safe_type_items(env, [item] if item else [])
+        if opened == "menu":
+            # «Шинэ» → баримтын төрөл сонгох цэс. Сценари заасан бол (add_menu) тэрийг, үгүй бол аюулгүй эхний төрлийг
+            # (устгах/батлах … хориотой — safe_type_items; «A B» гэсэн нийлмэл эх зүйлийг алгасна) сонгоно —
+            # өмнө нь энд зогсож автомат CRUD-ийн 21 цэс Blocked болдог байсан (testaccounting, 2026-10-19)
+            want = str(args.get("add_menu") or "")
+            all_items = menu_items
+            if want:
+                item = next((m for m in menu_items if m.strip() == want), None) or \
+                    next((m for m in menu_items if want.lower() in m.lower()), None)
+                safe, _ = ui.safe_type_items(env, [item] if item else [])
+            else:
+                safe, _ = ui.safe_type_items(env, menu_items)
+                safe = [m for m in safe if not any(o != m and o.strip() and o.strip() in m for o in safe)]
             if not safe or not await ui.click_popup_item(env, safe[0]):
-                raise StepBlocked(f"«{' / '.join(add)}» цэсэнд «{want}» алга ({', '.join(menu_items[:8])})",
-                                  skip_flow=True, category="tool")
+                raise StepBlocked(f"«{' / '.join(add)}» нь төрөл сонгох цэстэй ({', '.join(all_items[:8])}) — "
+                                  + (f"«{want}» алга" if want else "аюулгүй сонгох төрөл алга; YAML flow бичнэ үү"),
+                                  skip_flow=True, category="tool" if want else "")
             menu_items = []
+            env.run.meta["type_item"] = safe[0]
+            if not want:
+                env.note(f"«{' / '.join(add)}» → төрөл «{safe[0]}» сонгов (сонголтууд: {', '.join(all_items[:6])})")
             opened, new_tabs, _ = await wait_opened(env, before, tabs_before, menus=False)
             env.run.meta["opened"] = opened or "nothing"
-        if opened == "menu":
-            raise StepBlocked(f"«{' / '.join(add)}» нь төрөл сонгох цэстэй ({', '.join(menu_items[:8])}) — "
-                              "автоматаар сонгохгүй; YAML flow бичнэ үү", skip_flow=True)
         if not opened:
             raise StepBlocked("Нэмэх/Шинэ дарахад форм (цонх эсвэл шинэ таб) нээгдсэнгүй", skip_flow=True)
         if opened == "tab":

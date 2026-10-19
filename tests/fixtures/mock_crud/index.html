@@ -348,17 +348,56 @@ function groupFormView(tab) {
 }
 
 // Гүйлгээ: «Шинэ» нь баримтын төрөл сонгох dropdown — автомат CRUD сонгохгүй
+/* Гүйлгээ (SmartApp кассын/банкны баримтын жагсаалт шиг): «Шинэ» → төрөл сонгох цэс («Орлого Зарлага» нийлмэл эх
+ * зүйл, «Орлого», «Зарлага», «Баримт устгах» — хориотой). Төрөл сонгоход форм (Төрөл readonly, Тайлбар *). */
+let txns = [{id: 1, type: 'Орлого', desc: 'Бодит гүйлгээ'}], txseq = 1, txq = '', txsel = null;
+function txnForm(type, rec) {
+  const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">${esc(type)}</div>
+    <div class="dxbl-fl">${field('Төрөл', 'type', type, true)}${field('Тайлбар *', 'desc', rec ? rec.desc : '')}</div>
+    <button class="dxbl-btn save">Хадгалах</button> <button class="dxbl-btn cancel">Болих</button></div>`);
+  m.querySelector('.cancel').onclick = () => m.remove();
+  m.querySelector('.save').onclick = () => {
+    const desc = m.querySelector('[name=desc]').value.trim();
+    if (!desc) return toast('Тайлбар оруулна уу');
+    if (rec) rec.desc = desc; else txns.push({id: ++txseq, type, desc});
+    m.remove(); render();
+  };
+  document.body.appendChild(m);
+}
 function txnView() {
   const v = $(`<div class="tab-body"></div>`);
-  const bar = $(`<div class="toolbar"><button class="dxbl-btn add">Шинэ</button>
-      <button class="dxbl-btn del" disabled>Устгах</button></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn add">Шинэ</button> <button class="dxbl-btn edit">Засах</button>
+      <button class="dxbl-btn del">Устгах</button>
+      <span class="dxbl-grid-search-box"><input placeholder="Хайх..." value="${esc(txq)}"></span></div>`);
   bar.querySelector('.add').onclick = () => {
     if (v.querySelector('[role=menu]')) return;
-    const m = $(`<div role="menu" class="dxbl-dropdown-body"><div role="menuitem">Орлого</div><div role="menuitem">Зарлага</div></div>`);
+    const m = $(`<div role="menu" class="dxbl-dropdown-body"><div role="menuitem">Орлого Зарлага</div>
+      <div role="menuitem" data-t="Орлого">Орлого</div><div role="menuitem" data-t="Зарлага">Зарлага</div>
+      <div role="menuitem" class="rm">Баримт устгах</div></div>`);
+    m.querySelectorAll('[data-t]').forEach(it => it.onclick = () => { m.remove(); txnForm(it.dataset.t, null); });
+    m.querySelector('.rm').onclick = () => fetch('/api/untagged-touched', {method: 'POST', body: '{}'});
     v.appendChild(m);
   };
+  bar.querySelector('.edit').onclick = () => { const r = txns.find(x => x.id === txsel); if (r) txnForm(r.type, r); };
+  bar.querySelector('.del').onclick = () => {
+    const r = txns.find(x => x.id === txsel); if (!r) return;
+    const m = $(`<div class="dxbl-modal" role="dialog"><div>Устгахдаа итгэлтэй байна уу?</div>
+      <button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
+    m.querySelector('.no').onclick = () => m.remove();
+    m.querySelector('.yes').onclick = () => { m.remove(); txns = txns.filter(x => x.id !== r.id); txsel = null; render(); };
+    document.body.appendChild(m);
+  };
+  const inp = bar.querySelector('input');
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { txq = inp.value; render(); } };
   v.appendChild(bar);
-  v.appendChild($(`<table class="dxbl-grid"><thead><tr><th>№</th><th>Төрөл</th></tr></thead><tbody></tbody></table>`));
+  const t = $(`<table class="dxbl-grid"><thead><tr><th>№</th><th>Төрөл</th><th>Тайлбар</th></tr></thead><tbody></tbody></table>`);
+  for (const r of txns.filter(r => !txq || r.desc.toLowerCase().includes(txq.toLowerCase()))) {
+    const tr = $(`<table><tr role="row" class="${r.id === txsel ? 'dxbl-grid-selected-row dxbl-grid-focused-row' : ''}">
+      <td>${r.id}</td><td>${esc(r.type)}</td><td>${esc(r.desc)}</td></tr></table>`).querySelector('tr');
+    tr.onclick = () => { txsel = r.id; render(); };
+    t.querySelector('tbody').appendChild(tr);
+  }
+  v.appendChild(t);
   return v;
 }
 /* SmartApp-ын lookup цонхны бүтэц (бодит DOM-оос): toolbar «Сонгох», (сонголтоор) зүүн талд групп мод

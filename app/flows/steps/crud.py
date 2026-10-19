@@ -68,6 +68,17 @@ async def crud_create(env, args: dict) -> dict:
             raise StepFailed("Session тасрахаас өмнө бүртгэгдсэн тул capture талбарыг формоос уншиж чадсангүй")
         return {args.get("save_as") or "record": key_value}
     await ui.click_button(env, ui.buttons(env, "add", args.get("button")), scope="page")
+    if args.get("add_menu"):
+        # «Шинэ» → баримтын төрөл сонгох цэс (ж: «Кассын орлогын ордер»)
+        want = str(args["add_menu"])
+        for _ in range(20):
+            items = await ui.popup_menu_items(env)
+            if want in items:
+                break
+            await asyncio.sleep(0.25)
+        safe, _ = ui.safe_type_items(env, [want])
+        if not safe or not await ui.click_popup_item(env, want):
+            raise StepFailed(f"«Шинэ» цэсэнд «{want}» төрөл олдсонгүй")
     await ui.find_field(env, key, wait_s=10)          # форм нээгдэхийг хүлээнэ
     await _fill_all(env, fields)
     captured = await _capture(env, args.get("capture"))
