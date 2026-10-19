@@ -133,3 +133,16 @@ def test_tab_name_mismatch_two_classes():
     assert smoke_status(r, cfg) == M.PASS
     r.findings = [t("Өрөлтийн төрөл", "Мерчендайзийн төрөл")]
     assert smoke_status(r, cfg) == M.FAIL
+
+
+def test_short_e2e_only_run_has_no_pending_session_tc(cfg):
+    """Smoke-гүй 2 минутын бизнес процессын run: 20 минутын session шалгах боломжгүй — «Pending» TC үүсгэж Pass Rate-ийг
+    93.3% болгож NO-GO гаргадаг байсан (testaccounting P1 13/13 Pass, 2026-10-19)."""
+    run = make_run(0)
+    run.session_observed_s = 79
+    run.smoke_ran = False
+    tcs, _ = build_test_cases(run, cfg, "SSG", "2026-10-19")
+    assert "TC-LOGIN-002" not in [t.tc_id for t in tcs]
+    run.smoke_ran = True                                  # smoke-той богино run — Pending хэвээр (бүрэн бус)
+    tcs, _ = build_test_cases(run, cfg, "SSG", "2026-10-19")
+    assert [t.result for t in tcs if t.tc_id == "TC-LOGIN-002"] == ["Pending"]

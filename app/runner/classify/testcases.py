@@ -84,11 +84,15 @@ def build_test_cases(run: RunData, cfg: dict, executor: str, date: str) -> tuple
         s_res = M.PENDING
         s_note = (f"Run {_fmt_dur(run.session_observed_s)} үргэлжилсэн (< {min_min} мин) — "
                   "logout ажиглагдаагүй ч бүрэн баталгаажаагүй")
-    tcs.append(TestCase(
-        "TC-LOGIN-002", "SMOKE-LOGIN", f"Session {min_min}+ минут тасрахгүй байх",
-        "Нэвтэрсэн", f"1. Нэвтрэх\n2. {min_min} минут турш цэсүүдийг ашиглах\n3. /auth/login руу шилжсэн эсэхийг ажиглах",
-        "Session тасрахгүй, /auth/login руу шилжихгүй", "Automated", Severity.CRITICAL.xlsx, auto,
-        s_res, executor, date, note=s_note, module="LOGIN", menu_key="__session__"))
+    # Smoke-гүй богино run (ж: 2 минутын бизнес процессын E2E): {min_min} минутын session шалгах боломжгүй —
+    # «Pending» нь Pass Rate-ийг хиймлээр унагаж NO-GO болгодог байсан (testaccounting P1, 2026-10-19) → хамаарахгүй
+    skip_session = s_res == M.PENDING and not getattr(run, "smoke_ran", bool(run.results))
+    if not skip_session:
+        tcs.append(TestCase(
+            "TC-LOGIN-002", "SMOKE-LOGIN", f"Session {min_min}+ минут тасрахгүй байх",
+            "Нэвтэрсэн", f"1. Нэвтрэх\n2. {min_min} минут турш цэсүүдийг ашиглах\n3. /auth/login руу шилжсэн эсэхийг ажиглах",
+            "Session тасрахгүй, /auth/login руу шилжихгүй", "Automated", Severity.CRITICAL.xlsx, auto,
+            s_res, executor, date, note=s_note, module="LOGIN", menu_key="__session__"))
 
     # --- Цэс бүр = 1 TC ---------------------------------------------------
     counters: dict[str, int] = {}

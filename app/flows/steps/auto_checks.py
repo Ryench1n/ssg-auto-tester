@@ -142,7 +142,9 @@ async def auto_cleanup(env, args: dict) -> dict:
             left.append(f"{text.replace(tag, '{run_tag}')}: {str(e)[:200]}")
     if cleaned:
         env.run.meta["cleaned"] = [t.replace(tag, "{run_tag}") for t in cleaned]
-        env.note("Өмнөх алхам амжилтгүй болсон ч үүссэн тестийн өгөгдлийг устгав: " + ", ".join(cleaned))
+        failed_before = any(s.status != "Pass" and s.category not in ("na",) for s in env.run.steps[:-1])
+        env.note(("Өмнөх алхам амжилтгүй болсон ч үүссэн тестийн өгөгдлийг устгав: " if failed_before
+                  else "Тестийн өгөгдлийг устгав: ") + ", ".join(cleaned))
     if left:
         env.run.meta["leftover"] = left
         raise StepBlocked("Тестийн өгөгдөл үлдсэн (гараар устгана уу): " + "; ".join(left))
