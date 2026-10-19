@@ -140,6 +140,8 @@ async def pick_option(env: "FlowEngine", label: str, want: str = "") -> str:
         js = r"""([s, want, strict]) => { const v = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
           const all = Array.from(document.querySelectorAll(s)).filter(v).filter(x => (x.innerText || '').trim());
           const o = (want && all.find(x => x.innerText.includes(want))) || (strict ? null : all[0]);
+          if (want && all.length && !all.find(x => x.innerText.includes(want)))
+            window.__ssgComboMiss = all.map(x => x.innerText.trim()).slice(0, 15);
           if (!o) return ''; const t = o.innerText.trim(); o.click(); return t; }"""
         # 1) input дээр дарах  2) нээгдэхгүй бол dropdown (▾) товч — readonly ComboBox-д input дарахад нээгддэггүй
         for opener in ("input", "button"):
@@ -160,6 +162,10 @@ async def pick_option(env: "FlowEngine", label: str, want: str = "") -> str:
                 await asyncio.sleep(0.25)
             if picked:
                 break
+        miss = await page.evaluate("() => { const m = window.__ssgComboMiss; window.__ssgComboMiss = null; return m || null; }")
+        if miss and hasattr(env, "note"):
+            # Сценарийн хүссэн сонголт алга — бодит сонголтуудыг тайланд (калибровк: ж. барааны «Төрөл»)
+            env.note(f"'{label}': «{want}» сонголт алга — байгаа сонголтууд: {', '.join(miss)}")
     else:
         return ""
     await asyncio.sleep(0.3)

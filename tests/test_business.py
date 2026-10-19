@@ -294,8 +294,11 @@ def test_phase2_order_to_cash_site_scenario_is_self_contained(tmp_path):
                               on_waiting_login=HumanLogin("admin", PASSWORD))
         data = asyncio.run(pipe.run())
     fl = data.flows[0]
-    assert fl["status"] == M.PASS, [(s["index"], s["name"], s["status"], s["message"][:200], s["notes"][-2:])
-                                    for s in fl["steps"] if s["status"] != M.PASS]
+    # Бизнес процесс бүхэлдээ Pass; зөвхөн мэдэгдэж буй bug-ийн шалгалт (жагсаалт унадаг) Fail
+    bad = [(s["index"], s["name"], s["status"], s["message"][:200], s["notes"][-2:])
+           for s in fl["steps"] if s["status"] != M.PASS]
+    assert [b[1] for b in bad] == ["Харилцагчийн үлдэгдлийн жагсаалт /дансаар/ ачаалагдах"], bad
+    assert "ачаалагдсангүй" in bad[0][3]
     d = fl["data"]
     assert d["a0"] == {"ar": 0.0} and d["a1"] == {"ar": 1000.0} and d["a2"] == d["a3"] == d["a0"]
     assert d["s1"] == {"total": 1000.0}

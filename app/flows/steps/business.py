@@ -247,6 +247,11 @@ async def report_read(env, args: dict) -> dict:
         if not headers:      # нийлбэр, бичилтгүй (шинэ данс) — баганыг хоосон grid-ийн толгойноос
             grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), _want_columns(args.get("rows") or {})])
             headers = (grid or {}).get("headers") or []
+        if not headers:
+            # Хүснэгт огт зурагдаагүй (толгойгүй) — ж: testaccounting «Харилцагчийн үлдэгдлийн жагсаалт /дансаар/»
+            # өгөгдөл ачаалахад ErrorBoundary ('CustomerGroup' not found) унаж таб хоосон болсон (2026-10-19)
+            raise StepFailed("Жагсаалт ачаалагдсангүй — хүснэгт (толгой) зурагдаагүй, таб хоосон "
+                             "(консолын алдааг findings-ээс харна уу)")
     else:
         grid = None
         for _ in range(int(args.get("wait_s", 10) * 2)):
@@ -286,6 +291,10 @@ async def assert_delta(env, args: dict) -> dict:
       expect: {avlaga: "{amount}", orlogo: "-{amount}"}   # Δ = after − before
       tolerance: 0.01
     """
+    missing = [str(args[k]) for k in ("before", "after") if str(args[k]) not in env.ctx.data]
+    if missing:
+        # Тайлангийн агшин авагдаагүй (өмнөх уншилт амжилтгүй) — харьцуулах зүйлгүй, аппын шинэ алдаа биш
+        raise StepBlocked(f"Харьцуулах тайлангийн агшин алга: {', '.join(missing)} (уншилтын алхам амжилтгүй болсон)")
     before = env.ctx.data.get(str(args["before"])) or {}
     after = env.ctx.data.get(str(args["after"])) or {}
     tol = float(args.get("tolerance", 0.01))

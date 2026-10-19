@@ -1120,10 +1120,11 @@ const miniState = (kind) => MINI[kind] || (MINI[kind] = {rows: [], seq: 0, q: ''
 MINI.custgroups = {rows: [{id: 1, name: 'Ажилчид'}], seq: 0, q: '', sel: null};
 MINI.itemtypes = {rows: [{id: 1, name: 'Бараа'}, {id: 2, name: 'Үйлчилгээ'}], seq: 0, q: '', sel: null};
 const usedIn = (pred) => ((MINI.sdoc || {}).rows || []).some(pred) || ((MINI.cashdoc || {}).rows || []).some(pred);
-MINI_DEFS.custm = {cols: ['Код', 'Нэр'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'},
+MINI_DEFS.custm = {cols: ['Код', 'Нэр', 'Авлагын үлдэгдэл'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'},
     {label: 'Харилцагчийн бүлэг *', name: 'grp', kind: 'lookup', src: 'custgroups'},
     {label: 'Борлуулалтын харилцагч эсэх', name: 'sale', kind: 'check'}],
   validate: (v) => !v.code ? 'Код оруулна уу' : !v.name ? 'Нэр оруулна уу' : !v.grp ? 'Харилцагчийн бүлэг сонгоно уу' : '',
+  rowVals: (r) => [r.code, r.name, fmt(custBalances().filter(b => b.code === r.code).reduce((s, b) => s + b.end, 0))],
   inUse: (r) => usedIn(d => d.cust === r.code)};
 MINI_DEFS.itemm = {cols: ['Код', 'Нэр', 'Худалдах үнэ'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'},
     {label: 'Төрөл *', name: 'type', kind: 'lookup', src: 'itemtypes'}, {label: 'Худалдах үнэ', name: 'price'},
@@ -1243,7 +1244,7 @@ MINI_DEFS.cashdoc = {cols: ['Баримтын төрөл', 'Гүйлгээний
     document.body.appendChild(mnu);
   }};
 
-let cbq = '', cbSnap = null;
+let cbq = '', cbSnap = null, cbCrashed = false;
 const custBalances = () => {
   const out = {};
   for (const j of journals) for (const l of j.lines || [])
@@ -1255,7 +1256,13 @@ function custBalView() {
   const v = $(`<div class="tab-body"></div>`);
   const bar = $(`<div class="toolbar"><button class="dxbl-btn flt">Шүүх</button>
     <span class="dxbl-grid-search-box"><input placeholder="Хайх..." value="${esc(cbq)}"></span></div>`);
-  bar.querySelector('.flt').onclick = () => { cbSnap = custBalances(); render(); };
+  // Бодит testaccounting (2026-10-19): өгөгдөл ачаалахад grid унаж таб хоосон болно
+  bar.querySelector('.flt').onclick = () => { cbSnap = custBalances(); cbCrashed = true; render(); };
+  if (cbCrashed) {
+    console.error("fail: Microsoft.AspNetCore.Components.Web.ErrorBoundary[0]\n      System.Exception: A property with the name " +
+                  "'CustomerGroup' is not found in the object of type 'System.Data.DataRowView'.");
+    return $(`<div class="tab-body"></div>`);
+  }
   const inp = bar.querySelector('input');
   inp.onkeydown = (e) => { if (e.key === 'Enter') { cbq = inp.value; render(); } };
   v.appendChild(bar);
