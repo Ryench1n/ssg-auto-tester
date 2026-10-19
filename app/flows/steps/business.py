@@ -100,6 +100,37 @@ def pick_value(headers: list[str], rows: list[list[str]], match: str, column: st
     return v, ("" if v is not None else f"«{match}» × «{column}» нүд тоо биш: «{cell}»")
 
 
+def sum_values(headers: list[str], rows: list[list[str]], match: str, column: str,
+               minus: str = "") -> tuple[float | None, str]:
+    """match агуулсан БҮХ мөрийн Σ column (− Σ minus) — ж: ГД-ийн бичилтийн жагсаалтаас дансны үлдэгдэл
+    (Σ Дебет − Σ Кредит). Таарах мөргүй бол 0."""
+    hs = [_norm(h) for h in headers]
+
+    def col(name: str) -> int:
+        c = _norm(name)
+        return hs.index(c) if c in hs else next((i for i, h in enumerate(hs) if c in h), -1)
+
+    i, j = col(column), (col(minus) if minus else -1)
+    if i < 0 or (minus and j < 0):
+        miss = column if i < 0 else minus
+        return None, f"«{miss}» багана олдсонгүй (баганууд: {', '.join(headers[:12])})"
+    m = _norm(match)
+    total = 0.0
+    for r in rows:
+        if not any(_norm(x) == m or m in _norm(x) for x in r):
+            continue
+        shift = max(0, len(r) - len(headers))
+        for k, sign in ((i, 1), (j, -1)):
+            if k < 0:
+                continue
+            cell = r[k + shift] if k + shift < len(r) else ""
+            v = parse_amount(cell) if str(cell).strip() else 0.0
+            if v is None:
+                return None, f"«{match}» мөрийн «{headers[k]}» нүд тоо биш: «{cell}»"
+            total += sign * v
+    return total, ""
+
+
 def read_table_file(path: Path) -> tuple[list[str], list[list[str]]]:
     """Export хийсэн тайлан (xlsx / csv) → (толгой, мөрүүд). Толгой = эхний ≥2 текст нүдтэй мөр."""
     if path.suffix.lower() in (".xlsx", ".xlsm"):
@@ -130,6 +161,8 @@ async def report_read(env, args: dict) -> dict:
       search: true                   # grid: мөр бүрийг жагсаалтын хайлтаар шүүж уншина (ж: «Данс» жагсаалт)
       export: ["Файл үүсгэх", "Excel"]  # export горимын товч/цэсийн дараалал (сүүлийнх нь файл татна)
       rows: {avlaga: {match: "1201", column: "Эцсийн үлдэгдэл"}}
+            # эсвэл нийлбэр: {match: "<данс>", column: "Дебет", minus: "Кредит", agg: sum} — ГД-ийн бичилтийн жагсаалтаас
+      refresh: true                  # уншихын өмнө жагсаалтыг «Шүүх»/«Сэргээх»-ээр шинэчилнэ (нээлттэй таб хуучирсан байж болно)
       save_as: tb_before             # → ctx[tb_before] = {avlaga: 500000.0, …}
     """
     await ui.close_form(env)
@@ -161,6 +194,8 @@ async def report_read(env, args: dict) -> dict:
         env.note(f"Тайлангийн файл: reports/{path.name} ({len(rows)} мөр)")
     elif args.get("search"):
         # Жагсаалт (ж: «Данс» — Код, Үлдэгдэл): мөр бүрийг хайлтаар шүүж уншина (олон хуудастай жагсаалт)
+        if args.get("refresh", True):
+            await ui.reload_list(env)       # өмнө нээсэн таб — шинэ бичилт харагдахгүй байж болно
         headers, rows = [], []
         for spec in (args.get("rows") or {}).values():
             await ui.grid_find_settled(env, str(spec["match"]))
@@ -168,8 +203,11 @@ async def report_read(env, args: dict) -> dict:
             if grid and grid["rows"]:
                 headers = grid["headers"]
                 rows += grid["rows"]
-        if not rows:
+        if not rows and not all((x.get("agg") == "sum") for x in (args.get("rows") or {}).values()):
             raise StepBlocked("Жагсаалтаас хайсан мөр олдсонгүй — rows.match (дансны код)-ыг шалгана уу", category="tool")
+        if not headers:      # нийлбэр, бичилтгүй (шинэ данс) — баганыг хоосон grid-ийн толгойноос
+            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), [str(x["column"]) for x in (args.get("rows") or {}).values()]])
+            headers = (grid or {}).get("headers") or []
     else:
         grid = None
         for _ in range(int(args.get("wait_s", 10) * 2)):
@@ -183,7 +221,10 @@ async def report_read(env, args: dict) -> dict:
         headers, rows = grid["headers"], grid["rows"]
     values, problems = {}, []
     for alias, spec in (args.get("rows") or {}).items():
-        v, why = pick_value(headers, rows, str(spec["match"]), str(spec["column"]))
+        if spec.get("agg") == "sum":
+            v, why = sum_values(headers, rows, str(spec["match"]), str(spec["column"]), str(spec.get("minus") or ""))
+        else:
+            v, why = pick_value(headers, rows, str(spec["match"]), str(spec["column"]))
         if v is None:
             problems.append(f"{alias}: {why}")
         else:

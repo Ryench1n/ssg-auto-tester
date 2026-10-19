@@ -474,10 +474,12 @@ function journalView() {
   const inp = bar.querySelector('input');
   inp.onkeydown = (e) => { if (e.key === 'Enter') { jq = inp.value; render(); } };
   v.appendChild(bar);
-  const t = $(`<table class="dxbl-grid"><thead><tr><th></th><th>№</th><th>Утга</th><th>Дүн</th></tr></thead><tbody></tbody></table>`);
+  // SmartApp «Гүйлгээний жагсаалт»: бичилт (мөр) бүр — Данс, Дебет, Кредит; хайлт дансны кодоор ч шүүнэ
+  const t = $(`<table class="dxbl-grid"><thead><tr><th></th><th>№</th><th>Утга</th><th>Данс</th><th>Дебет - ₮</th><th>Кредит - ₮</th></tr></thead><tbody></tbody></table>`);
   // Бодит SmartApp «Гүйлгээний жагсаалт»: баримтын мөр (дебет/кредит) бүрийг ТУСАД НЬ харуулна
-  for (const j of journals.filter(j => !jq || j.desc.toLowerCase().includes(jq.toLowerCase()))) {
-    for (const l of j.lines) {
+  const q = jq.toLowerCase();
+  for (const j of journals) {
+    for (const l of j.lines.filter(l => !q || j.desc.toLowerCase().includes(q) || String(l.code).toLowerCase().includes(q))) {
       // SmartApp: мөр дарахад бичлэг засварын горимд НЭЭГДЭНЭ; сонгохдоо (текстгүй) checkbox
       const cls = [j.id === jsel ? 'dxbl-grid-selected-row' : '', j.id === jfocus ? 'dxbl-grid-focused-row' : ''].join(' ');
       const tr = $(`<table><tr role="row" data-visible-index="0" class="${cls}">
@@ -1094,7 +1096,9 @@ MINI.acctypes = {rows: [{id: 1001, name: 'Касс дахь мөнгө Тусл�
 MINI_DEFS.accm = {cols: ['Код', 'Нэр', 'Үлдэгдэл'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'},
                                                             {label: 'Дансны төрөл *', name: 'type', kind: 'lookup', src: 'acctypes'}],
   validate: (v) => !v.code ? 'Код оруулна уу' : !v.name ? 'Нэр оруулна уу' : !v.type ? 'Дансны төрөл сонгоно уу' : '',
-  computed: (r) => [accBal(r.code) ? fmt(accBal(r.code)) : ''],      // SmartApp: тэг үлдэгдэл — хоосон нүд
+  // SmartApp «Данс» жагсаалтын «Үлдэгдэл» — хадгалсан утга: гүйлгээгээр шууд шинэчлэгддэггүй (testaccounting
+  // 2026-10-19: ГД-ийн гүйлгээний дараа ч хоосон) — шинэ данс тул үргэлж хоосон
+  computed: () => [''],
   tree: ['Бүх данс', 'Эргэлтийн хөрөнгө', 'Эргэлтийн бус хөрөнгө', 'Өр төлбөр', 'Эзэмшигчийн өмч', 'Борлуулалт', 'Өртөг'],
   inUse: (r) => journals.some(j => (j.lines || []).some(l => l.code === r.code))};
 const allAccounts = () => ACCOUNTS.concat(((MINI.accm || {}).rows || []).map(r => ({code: r.code, name: r.name})));

@@ -9,7 +9,7 @@ import pytest
 
 from app import models as M
 from app.config import load_config
-from app.flows.steps.business import parse_amount, pick_value, read_table_file
+from app.flows.steps.business import parse_amount, pick_value, read_table_file, sum_values
 from app.pipeline.runner import PipelineRunner
 from app.runner.smoke import RunOptions
 from tests.fixtures.mock_crud.server import PASSWORD, CrudServer
@@ -85,6 +85,14 @@ def test_pick_value_and_files(tmp_path):
     hh, rr = read_table_file(tmp_path / "tb.xlsx")
     assert pick_value(hh, rr, "1201", "Эцсийн үлдэгдэл")[0] == 1234.5
     assert parse_amount("(2,500.00)") == -2500.0 and parse_amount("—") is None
+
+    # ГД-ийн бичилтийн жагсаалтаас дансны үлдэгдэл: Σ Дебет − Σ Кредит (хоосон нүд = 0, бичилтгүй = 0)
+    h = ["№", "Утга", "Данс", "Дебет - ₮", "Кредит - ₮"]
+    r = [["ЖУ1", "x", "A01", "1.00", "0.00"], ["ЖУ1", "x", "A02", "0.00", "1.00"], ["ЖУ2", "y", "A01", "", "5"]]
+    assert sum_values(h, r, "A01", "Дебет", "Кредит") == (-4.0, "")
+    assert sum_values(h, r, "A02", "Дебет", "Кредит") == (-1.0, "")
+    assert sum_values(h, [], "A01", "Дебет", "Кредит") == (0.0, "")
+    assert "багана олдсонгүй" in sum_values(h, r, "A01", "Үлдэгдэл")[1]
 
 
 # ---------------------------------------------------------------- mock: Үе 1-ийн дуусах шалгуур
