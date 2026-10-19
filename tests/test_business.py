@@ -335,3 +335,28 @@ def test_want_matches_plain_strict_and_pattern():
     assert want_matches("=SSG01", "SSG01 тест") and not want_matches("=SSG01", "C-0001 Бодит")
     assert want_matches("авлага&!валют", "120101 Дансны авлага MNT")
     assert not want_matches("авлага&!валют", "120501 Валютын авлага")
+
+
+@e2e
+def test_blocked_step_in_e2e_flow_keeps_its_test_cases(tmp_path):
+    """Автомат CRUD-ийн «урсгалыг алгасах» (skip_flow) нь E2E сценарид хэрэглэгдэхгүй — P2 (2026-10-19): кассын алхам
+    Blocked болоход 27 TC бүгд тайлангаас алга болж «GO 100%» гарсан. Одоо TC-үүд үлдэж Blocked харагдана."""
+    from app.report.build import generate_reports
+    spec = {"type": "e2e", "code": "EB", "steps": [
+        {"uses": "crud.auto_create", "name": "Тест бүртгэл (байхгүй тест бүсийг заасан)",
+         "with": {"menu": "Мастер дата|Бүртгэл|Харилцагч|/md/customers", "save_as": "x01_rec", "field_as": "x01_field",
+                  "try_as": "x01_try", "prefer": {"Бүс": "{run_tag}99"}}},
+        {"uses": "crud.auto_cleanup", "name": "Цэвэрлэх", "always": True,
+         "with": {"menu": "Мастер дата|Бүртгэл|Харилцагч|/md/customers", "data": "x01"}}]}
+    with CrudServer() as srv:
+        cfg = load_config(srv.url, {**FAST, "flows": {"EB": spec}})
+        pipe = PipelineRunner("eb", srv.url, cfg, RunOptions(project="T"), tmp_path,
+                              steps=[{"kind": "crud", "flow": "EB"}], headless=True,
+                              on_waiting_login=HumanLogin("admin", PASSWORD))
+        data = asyncio.run(pipe.run())
+    fl = data.flows[0]
+    assert fl["steps"][0]["status"] == M.BLOCKED and "skipped" not in (fl.get("meta") or {}), fl["steps"][0]["message"]
+    summary = generate_reports(data, cfg, tmp_path, verify=False)
+    ids = [t["id"] for t in summary["tcs"]]
+    assert "TC-FLOW-EB-001" in ids and summary["decision"] != "GO" or summary["stats"]["blocked"] >= 1, (ids, summary["stats"])
+    assert "TC-FLOW-EB-001" in ids

@@ -356,7 +356,10 @@ class FlowEngine:
             res.status, res.message = M.BLOCKED, self.sanitize(str(e))
             res.findings = list(e.findings) + [f for f in res.findings if f not in e.findings]
             res.category = e.category
-            if e.skip_flow:
+            # «Урсгалыг бүхэлд нь алгасах» нь зөвхөн автомат CRUD-д (цэсийг автоматаар шалгаж чадаагүй). E2E / бичсэн
+            # сценари TC-гээ алдахгүй — P2 (2026-10-19): кассын алхам Blocked болоход 27 TC бүгд тайлангаас алга болж,
+            # бодит bug-тай урсгал «GO 100%» гэж гарсан
+            if e.skip_flow and self.run.meta.get("auto"):
                 self.run.meta["skipped"] = res.message
         except StepFailed as e:
             res.status, res.message = M.FAIL, self.sanitize(str(e))

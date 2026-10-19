@@ -351,6 +351,9 @@ async def _auto_create(env, args: dict) -> dict:
             if not val and tag in mine:
                 raise StepBlocked(f"'{label}' сонголтод тестийн «{mine}» бичлэг олдсонгүй — бодит бичлэгээр "
                                   "орлуулаагүй (өмнөх алхам үүсгэсэн эсэхийг шалгана уу)", skip_flow=True, category="tool")
+            if not val and mine and not current:
+                raise StepBlocked(f"'{label}' сонголтод сценарийн заасан «{mine}» олдсонгүй — lookup-д байгаа мөрүүдийг "
+                                  "тэмдэглэлээс харж сценарийг тааруулна уу", skip_flow=True, category="tool")
             if not val and current:
                 # Анхдагчийг солих гэсэн ч хүссэн сонголт алга — анхдагч хэвээр (сонголтуудыг тэмдэглэлээс харна)
                 picked[label] = current

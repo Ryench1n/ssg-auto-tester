@@ -55,6 +55,23 @@ async def _lookup_search(env: "FlowEngine", text: str) -> bool:
     return True
 
 
+_LOOKUP_ROWS_JS = r"""([sel]) => { /*__COMMON__*/
+  const root = __scope(sel, 'dialog'); if (!root) return [];
+  return Array.from(root.querySelectorAll('tr[data-visible-index], ' + sel.grid_row)).filter(__vis)
+    .filter(r => !r.closest('dxbl-tree-list, thead, tfoot'))
+    .map(r => __txt(r).replace(/\s+/g, ' ').trim()).filter(t => t && !/бичлэг олдсонгүй/i.test(t))
+    .filter((t, i, a) => a.indexOf(t) === i).slice(0, 15).map(t => t.slice(0, 60)); }""".replace("/*__COMMON__*/", _COMMON_JS)
+
+
+async def _visible_lookup_rows(env: "FlowEngine", clear_search: bool) -> list[str]:
+    try:
+        if clear_search:
+            await _lookup_search(env, "")
+        return await env.page.evaluate(_LOOKUP_ROWS_JS, [sel_payload(env)])
+    except Exception:
+        return []
+
+
 async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True, want: str = "") -> str:
     """`[data-ssg-lookup='1']` ("...") товчоор lookup цонх нээж, өгөгдлийн grid-ийн фокуслагдсан (эсвэл эхний)
     мөрийг сонгоно: нүд дээр нэг дарж → «Сонгох». Сонгосон мөрийн текст, чадахгүй бол "" (цонхыг хаана).
@@ -121,6 +138,12 @@ async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True,
                 await close_form(env, keep=before)
                 raise StepFailed(f"{what or 'Сонголтын'} (lookup) цонх нээхэд: {errors[0].text}", errors)
             log(f"мөр олдсонгүй ({'хоосон' if row == '' else 'ачаалагдаагүй/таниагүй'})")
+            if want:
+                # Калибровк: хайлтыг цэвэрлээд lookup-д БОДИТ байгаа мөрүүдийг тайланд (ж: кассын орлогын «Данс»-д
+                # авлагын данс огт гардаггүй — 2026-10-19)
+                rows = await _visible_lookup_rows(env, searched)
+                if rows and hasattr(env, "note"):
+                    env.note(f"{what or 'Сонголт'}: «{want}» алга — lookup-ийн мөрүүд: {' | '.join(rows)}")
             await close_form(env, keep=before)
             return ""
         cell = await page.evaluate("() => { const c = document.querySelector('[data-ssg-lkcell=\"1\"]');"

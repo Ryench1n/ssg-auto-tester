@@ -35,6 +35,11 @@ def load_run(raw_path: Path) -> M.RunData:
                 if (f.get("meta") or {}).get("auto"):
                     f["meta"]["skipped"] = s["message"]
                 f["status"] = _flow_status(f["steps"])
+    # Хуучин raw.json: E2E / бичсэн сценари «алгассан» гэж тэмдэглэгдэж TC-гээ алдсан байж болно (P2, 2026-10-19)
+    for f in d.get("flows") or []:
+        meta = f.get("meta") or {}
+        if meta.get("skipped") and not meta.get("auto"):
+            meta.pop("skipped")
     # Хуучин (ангилалгүй) raw.json: форм шалгалтын Blocked-ийн ангиллыг мессежээс нөхнө
     for f in d.get("flows") or []:
         if not (f.get("meta") or {}).get("formcheck"):
