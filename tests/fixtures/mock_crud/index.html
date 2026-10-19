@@ -1048,6 +1048,10 @@ const MINI_DEFS = {
   // «Хот»: «Улс» lookup-ийн эхний мөр «999 Бүх улс» — сонговол «Улс сонгогдоогүй байна!» (HR «Хот, аймаг»)
   city: {cols: ['Нэр', 'Улс'], fields: [{label: 'Нэр *', name: 'name'}, {label: 'Улс *', name: 'country', kind: 'lookup', src: 'countries'}],
          validate: (v) => !v.name ? 'Нэр оруулна уу' : (!v.country || /Бүх/.test(v.country)) ? 'Улс сонгогдоогүй байна!' : ''},
+  // «Бүлгийн лавлах» (testaccounting «Гүйлгээний загварын бүлэг» г.м.): формд бүлгийн талбаргүй — зүүн талын модноос
+  // бодит (Бүх биш) бүлгийг сонгосны дараа «Нэмэх»; эс бөгөөс «Харьяалагдах бүлэг сонгоогүй байна!»
+  tgrp: {cols: ['Нэр', 'Бүлэг'], fields: [{label: 'Нэр *', name: 'name'}], validate: (v) => !v.name ? 'Нэр оруулна уу' : '',
+         tree: ['Бүх бүлэг', 'Санхүү', 'Борлуулалт'], needGroup: true, rowVals: (r) => [r.name, r.grp || '']},
   // «Удаан жагсаалт»: хадгалсан/устгасан бичлэг жагсаалтад 1.2 сек хоцорч тусна (grid дахин ачаалал)
   slow: {cols: ['Нэр'], fields: [{label: 'Нэр *', name: 'name'}], validate: (v) => !v.name ? 'Нэр оруулна уу' : '', delay: 1200},
   // «Шүүлттэй жагсаалт»: SmartApp-ын баримтын жагсаалт шиг — хадгалсан бичлэг «Шүүх» дарж байж харагдана
@@ -1362,9 +1366,13 @@ function miniView(kind) {
     };
     bar.insertBefore(b, bar.querySelector('.dxbl-grid-search-box'));
   }
-  if (d.tree) v.appendChild($(`<dxbl-tree-list class="dxbl-grid" style="display:block"><table><thead><tr><th>Нэр</th></tr></thead>
-    <tbody>${d.tree.map(x => `<tr role="row"><td>${x}</td></tr>`).join('')}</tbody></table></dxbl-tree-list>`));
-  const t = $(`<table class="dxbl-grid"><thead><tr>${d.cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody></tbody></table>`);
+  if (d.tree) {
+    const tl = $(`<dxbl-tree-list class="dxbl-grid" style="display:block;width:200px"><table><thead><tr><th>Нэр</th></tr></thead>
+      <tbody>${d.tree.map(x => `<tr role="row" class="${st.group === x ? 'dxbl-grid-focused-row' : ''}"><td>${x}</td></tr>`).join('')}</tbody></table></dxbl-tree-list>`);
+    tl.querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => { st.group = tr.textContent.trim(); render(); });
+    v.appendChild(tl);
+  }
+  const t = $(`<table class="dxbl-grid" style="${d.tree ? 'width:700px;min-height:300px;display:table' : ''}"><thead><tr>${d.cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody></tbody></table>`);
   const vals = (r) => d.rowVals ? d.rowVals(r) : d.extraCols ? [r.number || '', ...d.fields.map(f => r[f.name] || ''), r.status || 'Ноорог']
                                   : d.fields.map(f => r[f.name] || '').concat(d.computed ? d.computed(r) : []);
   for (const r of st.rows.filter(r => !r.hidden && !r.fresh && !d.ghost).filter(r => !st.q || vals(r).join(' ').toLowerCase().includes(st.q.toLowerCase()))) {
@@ -1400,6 +1408,8 @@ function miniForm(kind, rec) {
     for (const f of d.fields) { const el = m.querySelector(`[name=${f.name}]`); v[f.name] = f.kind === 'check' ? el.checked : el.value.trim(); }
     const err = d.validate(v);
     if (err) { toast(err); return; }
+    if (d.needGroup && !rec && (!st.group || /^Бүх/.test(st.group))) { warnModal('Харьяалагдах бүлэг сонгоогүй байна!'); return; }
+    if (d.needGroup && !rec) v.grp = st.group;
     if (rec) { if (d.onUpdate) d.onUpdate(rec, v); Object.assign(rec, v); }
     else {
       const row = {id: ++st.seq, ...v, hidden: !!d.delay, fresh: !!d.manual};

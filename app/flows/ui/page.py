@@ -289,19 +289,24 @@ _MAIN_GRID_JS = r"""
 # Master-detail жагсаалтын хажуугийн (бүлгийн) панелийн мөр — «Бүх …» үндэс байвал түүнийг, үгүй бол эхнийхийг
 # [data-ssg-side='1'] гэж тэмдэглэнэ. Мөр сонгох нь уншилт (өгөгдөл өөрчлөхгүй).
 SIDE_GROUP_ROW_JS = r"""
-([sel]) => {
+([sel, nonroot]) => {
   /*__COMMON__*/
   /*__MAIN__*/
   document.querySelectorAll('[data-ssg-side]').forEach(e => e.removeAttribute('data-ssg-side'));
-  const main = __mainGrid(sel);
+  const isRoot = (r) => /^(\S+\s+)?бүх(\s|$)/i.test(__txt(r));
+  const trees = __grids(sel).filter(g => g.tagName.toLowerCase() === 'dxbl-tree-list' || g.closest('dxbl-tree-list'));
+  const main = __mainGrid(sel) || (nonroot ? trees[0] : null);
   if (!main) return null;
-  const side = __grids(sel).filter(g => g !== main);
+  let side = __grids(sel).filter(g => g !== main);
+  // nonroot: жагсаалт өөрөө бүлгийн мод (хажуу панелгүй) бол модны дэд зангилаа
+  if (nonroot && !side.length && trees.includes(main)) side = [main];
   const empty = /^(бичлэг олдсонгүй|no data|түр хүлээнэ үү)/i;
   const rows = side.flatMap(g => Array.from(g.querySelectorAll(sel.grid_row + ', [role=row], tr')))
     .filter(__vis).filter(r => !r.closest('thead'))
     .filter(r => !/header|footer|filter|edit-new/.test(typeof r.className === 'string' ? r.className : ''))
     .filter(r => { const t = __txt(r); return t && !empty.test(t); });
-  const row = rows.find(r => /^(\S+\s+)?бүх(\s|$)/i.test(__txt(r))) || rows[0];
+  // nonroot: «Бүх …» үндсийг сонговол «Бүлэг сонгоогүй байна» — бодит (дэд) бүлэг; эс бөгөөс үндэс (шүүлтгүй)
+  const row = nonroot ? rows.find(r => !isRoot(r)) : (rows.find(isRoot) || rows[0]);
   if (!row) return null;
   (row.querySelector('td') || row).setAttribute('data-ssg-side', '1');
   return __txt(row).replace(/\s+/g, ' ').slice(0, 80);
@@ -309,16 +314,20 @@ SIDE_GROUP_ROW_JS = r"""
 """.replace("/*__COMMON__*/", _COMMON_JS).replace("/*__MAIN__*/", _MAIN_GRID_JS)
 
 
-async def select_side_group(env: "FlowEngine") -> str:
-    """Master-detail жагсаалт хоосон / «Шинэ» ажиллахгүй бол бүлгийн панелээс бүлэг сонгоно (уншилт). Бүлгийн нэр | ""."""
+async def select_side_group(env: "FlowEngine", nonroot: bool = False) -> str:
+    """Master-detail жагсаалт хоосон / «Шинэ» ажиллахгүй бол бүлгийн панелээс бүлэг сонгоно (уншилт). Бүлгийн нэр | "".
+    nonroot: «Бүх …» биш бодит бүлэг (шинэ бичлэг тэр бүлэгт бүртгэгдэнэ — «Бүлэг сонгоогүй байна» анхааруулгад)."""
+    before = await dialog_count(env)
     try:
-        name = await env.page.evaluate(SIDE_GROUP_ROW_JS, [sel_payload(env)])
+        name = await env.page.evaluate(SIDE_GROUP_ROW_JS, [sel_payload(env), nonroot])
         if not name:
             return ""
         await env.page.click("[data-ssg-side='1']", timeout=3000)
     except Exception:
         return ""
     await settle(env, 5)
+    if await dialog_count(env) > before:            # мөр дарахад засварын форм нээгдсэн — ХАДГАЛАХГҮЙ хаана
+        await close_form(env, keep=before)
     return name
 
 

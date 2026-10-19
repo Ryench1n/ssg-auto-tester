@@ -25,6 +25,7 @@ CITY = key_of("Мастер дата", "Бүртгэл", "Хот", "/md/city")
 SLOW = key_of("Мастер дата", "Бүртгэл", "Удаан жагсаалт", "/md/slow")
 MANUAL = key_of("Мастер дата", "Бүртгэл", "Шүүлттэй жагсаалт", "/md/manual")
 GHOST = key_of("Мастер дата", "Бүртгэл", "Үл харагдах жагсаалт", "/md/ghost")
+TGRP = key_of("Мастер дата", "Бүртгэл", "Бүлгийн лавлах", "/md/tgrp")
 
 
 def f(label, **kw):
@@ -100,7 +101,7 @@ def deps_run(tmp_path_factory):
     rd = tmp_path_factory.mktemp("deps")
     with CrudServer() as srv:
         srv.state.deps = True
-        pipe, cfg = make_pipe(srv, rd, [{"kind": "autocrud", "menus": [LEAVE, EMP, NOTE, PROJ, LOCK, SCHED, EBAR, CITY, SLOW, MANUAL, GHOST]}], [])
+        pipe, cfg = make_pipe(srv, rd, [{"kind": "autocrud", "menus": [LEAVE, EMP, NOTE, PROJ, LOCK, SCHED, EBAR, CITY, SLOW, MANUAL, GHOST, TGRP]}], [])
         data = asyncio.run(pipe.run())
     summary = generate_reports(data, cfg, rd, verify=False)
     by = {}
@@ -345,3 +346,13 @@ def test_fill_lines_header_shorter_than_cells():
     import inspect
     from app.flows.ui import lines
     assert "i < len(headers)" in inspect.getsource(lines.fill_lines)
+
+
+@e2e
+def test_group_required_from_tree_is_selected_and_retried(deps_run):
+    """«Харьяалагдах бүлэг сонгоогүй байна!» (формд бүлгийн талбаргүй) — зүүн талын модноос «Бүх» биш бүлгийг сонгоод
+    дахин бүртгэнэ (testaccounting ~11 бүлгийн лавлах Blocked байсан)."""
+    fl = deps_run["by"][TGRP]
+    assert fl["status"] == M.PASS, steps_of(fl)
+    assert fl["meta"]["group"] == "Санхүү"
+    assert "бүлгийн модноос «Санхүү» сонгоод" in " ".join(fl["steps"][0]["notes"])

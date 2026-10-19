@@ -230,8 +230,27 @@ async def wait_opened(env, before: int, tabs_before: list[str], menus: bool = Tr
     return "", [], []
 
 
+# «Бүлэг сонгоогүй байна!» / «Харьяалагдах бүлэг сонгоно уу» — формд тийм талбаргүй: бүлгийг жагсаалтын (зүүн)
+# бүлгийн модноос сонгосны дараа «Шинэ» дардаг (testaccounting: ~11 бүлгийн лавлах, 2026-10-19)
+GROUP_MISSING = re.compile(r"(бүлэг|групп)\w*\s+(сонгоогүй|сонгогдоогүй|сонгоно уу|хоосон)", re.I)
+
+
 @step("crud.auto_create")
 async def auto_create(env, args: dict) -> dict:
+    try:
+        return await _auto_create(env, args)
+    except StepBlocked as e:
+        if args.get("_group") or not GROUP_MISSING.search(str(e)):
+            raise
+        group = await ui.select_side_group(env, nonroot=True)
+        if not group:
+            raise
+        env.note(f"«{GROUP_MISSING.search(str(e)).group(0)}» — бүлгийн модноос «{group}» сонгоод дахин бүртгэв")
+        env.run.meta["group"] = group
+        return await _auto_create(env, {**args, "_group": group})
+
+
+async def _auto_create(env, args: dict) -> dict:
     """with: {menu: <цэсний түлхүүр/зам>, save_as: a01_rec, field_as: a01_field,
               try_as: a01_try,      # хадгалахын ӨМНӨ ctx-д бичнэ — Fail болсон ч цэвэрлэгээ хайж устгана
               values_as: a01_vals,  # бөглөсөн утгууд — засварын дараа дахин нээж шалгахад (crud.auto_verify)
