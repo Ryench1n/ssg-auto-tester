@@ -115,7 +115,11 @@ async def peek_line_lookups(env: "FlowEngine", what: str, limit: int = 3) -> dic
 async def pick_option(env: "FlowEngine", label: str, want: str = "") -> str:
     """Сонголтын талбарт (select / combobox / lookup "...") эхний боломжит утгыг сонгоно.
     want: энэ текст агуулсан мөр/утгыг сонгох (ж: автомат CRUD-ийн үүсгэсэн мастер бичлэг) — олдохгүй бол
-    эхний утга. Сонгосон утгын текстийг, чадахгүй бол "" буцаана. Сонгох нь өгөгдөл өөрчлөхгүй."""
+    эхний утга. Сонгосон утгын текстийг, чадахгүй бол "" буцаана. Сонгох нь өгөгдөл өөрчлөхгүй.
+    Хатуу сонголт (орлуулахгүй): «=X», эсвэл run_tag агуулсан want — тестийн бичлэг (ж: тест харилцагч) олдохгүй
+    бол бодит бичлэгийг ХЭЗЭЭ Ч сонгохгүй (борлуулалт бодит харилцагч руу бичигдэхээс сэргийлнэ)."""
+    strict = want.startswith("=") or bool(getattr(getattr(env, "ctx", None), "run_tag", "") and env.ctx.run_tag in want)
+    want = want[1:] if want.startswith("=") else want
     info = await find_field(env, label)
     page = env.page
     loc = page.locator("[data-ssg-field='1']")
@@ -128,14 +132,14 @@ async def pick_option(env: "FlowEngine", label: str, want: str = "") -> str:
         picked = await loc.evaluate("e => e.options[e.selectedIndex] ? e.options[e.selectedIndex].text : ''")
     elif info.get("lookup"):
         picked = await pick_from_lookup(env, f"'{label}' талбарын сонголтын", want=want) if want else ""
-        if not picked and not (want.startswith("!") or "&" in want):   # нөхцөлт сонголтыг нөхцөлгүйгээр орлуулахгүй
+        if not picked and not strict and not (want.startswith("!") or "&" in want):   # нөхцөлт сонголтыг нөхцөлгүйгээр орлуулахгүй
             picked = await pick_from_lookup(env, f"'{label}' талбарын сонголтын")
         if not picked:
             return ""
     elif info["combo"]:
-        js = r"""([s, want]) => { const v = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        js = r"""([s, want, strict]) => { const v = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
           const all = Array.from(document.querySelectorAll(s)).filter(v).filter(x => (x.innerText || '').trim());
-          const o = (want && all.find(x => x.innerText.includes(want))) || all[0];
+          const o = (want && all.find(x => x.innerText.includes(want))) || (strict ? null : all[0]);
           if (!o) return ''; const t = o.innerText.trim(); o.click(); return t; }"""
         # 1) input дээр дарах  2) нээгдэхгүй бол dropdown (▾) товч — readonly ComboBox-д input дарахад нээгддэггүй
         for opener in ("input", "button"):
@@ -150,7 +154,7 @@ async def pick_option(env: "FlowEngine", label: str, want: str = "") -> str:
             except Exception:
                 continue
             for _ in range(8 if opener == "input" else 16):
-                picked = await page.evaluate(js, [sel_payload(env)["list_option"], want])
+                picked = await page.evaluate(js, [sel_payload(env)["list_option"], want, strict])
                 if picked:
                     break
                 await asyncio.sleep(0.25)

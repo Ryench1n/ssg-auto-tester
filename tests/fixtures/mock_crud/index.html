@@ -146,6 +146,7 @@ function render() {
   else if (cur && MINI_DEFS[cur.kind]) content.appendChild(miniView(cur.kind));
   else if (cur && cur.kind === 'tb') content.appendChild(tbView());
   else if (cur && cur.kind === 'acclist') content.appendChild(accListView());
+  else if (cur && cur.kind === 'custbal') content.appendChild(custBalView());
   else content.appendChild($(`<div class="tab-body">${active}</div>`));
   layout.appendChild(content);
   root.appendChild(layout);
@@ -1107,14 +1108,172 @@ const allAccounts = () => ACCOUNTS.concat(((MINI.accm || {}).rows || []).map(r =
 MINI.countries = {rows: [{id: 999, name: 'Бүх улс'}, {id: 496, name: 'Монгол'}], seq: 0, q: '', sel: null};
 const miniState = (kind) => MINI[kind] || (MINI[kind] = {rows: [], seq: 0, q: '', sel: null});
 
+/* ---------------------------------------------------------------- Үе 2: Order-to-Cash (testaccounting шиг)
+ * custm  «Харилцагчийн бүртгэл»: Код, Нэр, Харилцагчийн бүлэг *, «Борлуулалтын харилцагч эсэх» — тэмдэглээгүй бол
+ *        борлуулалтын «Харилцагч» lookup-д гарахгүй. itemm «Барааны бүртгэл»: Төрөл (Бараа / Үйлчилгээ), Худалдах үнэ,
+ *        «Борлуулах бараа эсэх». Бараа (үлдэгдэлгүй) борлуулбал «үлдэгдэл хүрэлцэхгүй».
+ * sdoc   «Борлуулалтын жагсаалт»: форм — Харилцагч (заавал биш; lookup-ийн эхний мөр БОДИТ харилцагч), Гүйлгээний утга *,
+ *        Данс * (эхний мөр 1001 Касс — бэлэн борлуулалт, авлага үүсгэхгүй; 1201 Дансны авлага — зээлээр), барааны мөр.
+ *        Хадгалахад ГД-д: Дт Данс / Кт 5101 (хоёр мөрөнд харилцагчийн код). Устгахад ГД-ийн бичилт устана.
+ * cashdoc «Кассын баримтын жагсаалт»: «Шинэ» → төрөл сонгох цэс (орлого / зарлага). Орлого: Дт 1001 / Кт 1201 (харилцагч).
+ * custbal «Харилцагчийн үлдэгдлийн жагсаалт /дансаар/»: зөвхөн 1201 дансны (Дт − Кт) харилцагчаар; «Шүүх»-ээр шинэчилнэ. */
+MINI.custgroups = {rows: [{id: 1, name: 'Ажилчид'}], seq: 0, q: '', sel: null};
+MINI.itemtypes = {rows: [{id: 1, name: 'Бараа'}, {id: 2, name: 'Үйлчилгээ'}], seq: 0, q: '', sel: null};
+const usedIn = (pred) => ((MINI.sdoc || {}).rows || []).some(pred) || ((MINI.cashdoc || {}).rows || []).some(pred);
+MINI_DEFS.custm = {cols: ['Код', 'Нэр'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'},
+    {label: 'Харилцагчийн бүлэг *', name: 'grp', kind: 'lookup', src: 'custgroups'},
+    {label: 'Борлуулалтын харилцагч эсэх', name: 'sale', kind: 'check'}],
+  validate: (v) => !v.code ? 'Код оруулна уу' : !v.name ? 'Нэр оруулна уу' : !v.grp ? 'Харилцагчийн бүлэг сонгоно уу' : '',
+  inUse: (r) => usedIn(d => d.cust === r.code)};
+MINI_DEFS.itemm = {cols: ['Код', 'Нэр', 'Худалдах үнэ'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'},
+    {label: 'Төрөл *', name: 'type', kind: 'lookup', src: 'itemtypes'}, {label: 'Худалдах үнэ', name: 'price'},
+    {label: 'Борлуулах бараа эсэх', name: 'sell', kind: 'check'}],
+  validate: (v) => !v.code ? 'Код оруулна уу' : !v.name ? 'Нэр оруулна уу' : !v.type ? 'Төрөл сонгоно уу' : '',
+  rowVals: (r) => [r.code, r.name, r.price || ''],
+  inUse: (r) => usedIn(d => (d.lines || []).some(l => l.code === r.code))};
+const saleCustomers = () => [{code: 'C-0001', name: 'Бодит харилцагч ХХК'}]
+  .concat(((MINI.custm || {}).rows || []).filter(r => r.sale).map(r => ({code: r.code, name: r.name})));
+const saleItems = () => ((MINI.itemm || {}).rows || []).filter(r => r.sell).map(r => ({code: r.code, name: r.name, price: +r.price || 0, type: r.type}));
+const custName = (code) => (saleCustomers().find(c => c.code === code) || {}).name || '';
+const dropJournal = (src) => { journals = journals.filter(j => j.src !== src); };
+
+function lookupField(label, name, value) {
+  return `<div class="dxbl-fl-item"><label class="dxbl-fl-cpt">${label}:</label><div class="dxbl-fl-ctrl">
+    <input name="${name}" value="${esc(value || '')}"><button class="dxbl-btn lk-${name}">...</button></div></div>`;
+}
+
+function saleForm(rec) {
+  const st = miniState('sdoc');
+  const lines = [];
+  let editIdx = null;
+  const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Борлуулалт
+      <button class="dxbl-popup-header-button">×</button></div>
+    <div class="dxbl-toolbar"><button class="dxbl-btn save">Хадгалах & Гарах</button></div>
+    <div class="dxbl-fl">${lookupField('Харилцагч', 'cust', '')}${field('Гүйлгээний утга *', 'desc', '')}
+      ${lookupField('Данс *', 'acc', '')}${field('Нийт дүн', 'total', '0', true)}</div>
+    <dxbl-grid class="dxbl-grid lines" style="display:block"><table><thead><tr class="dxbl-grid-header-row">
+      <th class="dxbl-grid-command-cell"><button class="dxbl-btn sl-grid-command"><span class="dxbl-image fa-regular fa-plus"></span></button></th>
+      <th>Барааны код</th><th>Барааны нэр</th><th>Сав баглааны тоо</th><th>Тоо хэмжээ</th><th>Нэгж үнэ</th><th>Дүн</th></tr></thead>
+      <tbody></tbody></table></dxbl-grid></div>`);
+  const tb = m.querySelector('.lines tbody');
+  const total = () => lines.reduce((s, l) => s + (+l.qty || 0) * (+l.price || 0), 0);
+  const draw = () => {
+    tb.innerHTML = '';
+    lines.forEach((l, i) => {
+      const ed = i === editIdx;
+      const inp = (key) => ed ? `<input class="dxbl-text-edit-input" data-k="${key}" value="${esc(l[key])}">` : esc(l[key]);
+      const attr = ed ? (l.code ? `data-visible-index="${i}" class="dxbl-grid-edit-row"` : 'data-visible-index="-1" class="dxbl-grid-edit-row dxbl-grid-edit-new-item-row-inplace"')
+                      : `data-visible-index="${i}"`;
+      const tr = $(`<table><tr role="row" ${attr}><td class="dxbl-grid-command-cell"><span class="fa-trash">🗑</span></td>
+        <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.code)}"><button class="dxbl-btn dxbl-text-edit-btn">...</button>` : esc(l.code)}</td>
+        <td>${esc(l.name)}</td><td>${inp('pack')}</td><td>${inp('qty')}</td><td>${inp('price')}</td><td>${(+l.qty || 0) * (+l.price || 0)}</td></tr></table>`).querySelector('tr');
+      tr.querySelectorAll('input[data-k]').forEach(x => x.onchange = () => { l[x.dataset.k] = x.value;
+        m.querySelector('[name=total]').value = total(); });
+      const lk = tr.querySelector('.dxbl-text-edit-btn');
+      if (lk) lk.onclick = (e) => { e.stopPropagation(); smartLookup('Бараа', saleItems(), false, (it) => {
+        Object.assign(l, {code: it.code, name: it.name, price: it.price, type: it.type}); draw(); }); };
+      tb.appendChild(tr);
+    });
+  };
+  m.querySelector('.sl-grid-command').onclick = () => {
+    lines.push({code: '', name: '', pack: '0', qty: '0', price: '0'}); editIdx = lines.length - 1; draw(); };
+  m.querySelector('.lk-cust').onclick = () => smartLookup('Харилцагч', saleCustomers(), false, (it) => {
+    m.querySelector('[name=cust]').value = it.code + ' ' + it.name; });
+  m.querySelector('.lk-acc').onclick = () => smartLookup('Данс', [{code: '1001', name: 'Касс дахь мөнгө'},
+    {code: '1201', name: 'Дансны авлага'}, {code: '1205', name: 'Валютын авлага'}], false, (it) => {
+    m.querySelector('[name=acc]').value = it.code + ' ' + it.name; });
+  m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+  m.querySelector('.save').onclick = () => {
+    const desc = m.querySelector('[name=desc]').value.trim(), acc = m.querySelector('[name=acc]').value.split(' ')[0];
+    const cust = m.querySelector('[name=cust]').value.split(' ')[0];
+    if (!desc) return toast('Гүйлгээний утга оруулна уу');
+    if (!acc) return warnModal('Данс сонгоно уу !');
+    const ok = lines.filter(l => l.code && +l.qty > 0);
+    if (!ok.length) return warnModal('Барааны мэдээлэл хоосон байна !');
+    if (ok.some(l => l.type === 'Бараа')) return warnModal('Барааны үлдэгдэл хүрэлцэхгүй байна !');
+    const sum = total();
+    const row = {id: ++st.seq, desc, cust, acc, total: sum, lines: ok};
+    st.rows.push(row);
+    journals.push({id: ++jseq, desc, amount: sum, src: 'sale' + row.id,
+      lines: [{code: acc, name: '', debit: sum, credit: 0, cust}, {code: '5101', name: 'Борлуулалтын орлого', debit: 0, credit: sum, cust}]});
+    m.remove(); render();
+  };
+  draw();
+  document.body.appendChild(m);
+}
+MINI_DEFS.sdoc = {cols: ['Гүйлгээний утга', 'Харилцагчийн нэр', 'Нийт дүн'], fields: [], validate: () => '',
+  form: saleForm, rowVals: (r) => [r.desc, custName(r.cust), fmt(r.total)], onDelete: (r) => dropJournal('sale' + r.id)};
+
+function cashForm(kind) {
+  const st = miniState('cashdoc');
+  const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">${esc(kind)}
+      <button class="dxbl-popup-header-button">×</button></div>
+    <div class="dxbl-fl">${field('Гүйлгээний утга *', 'desc', '')}${lookupField('Харилцагч', 'cust', '')}
+      ${lookupField('Данс *', 'acc', '')}${field('Дүн *', 'amount', '0')}</div>
+    <button class="dxbl-btn save">Хадгалах & Гарах</button></div>`);
+  m.querySelector('.lk-cust').onclick = () => smartLookup('Харилцагч', saleCustomers(), false, (it) => {
+    m.querySelector('[name=cust]').value = it.code + ' ' + it.name; });
+  m.querySelector('.lk-acc').onclick = () => smartLookup('Данс', [{code: '1001', name: 'Касс дахь мөнгө'}], false, (it) => {
+    m.querySelector('[name=acc]').value = it.code + ' ' + it.name; });
+  m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+  m.querySelector('.save').onclick = () => {
+    const desc = m.querySelector('[name=desc]').value.trim(), acc = m.querySelector('[name=acc]').value.split(' ')[0];
+    const cust = m.querySelector('[name=cust]').value.split(' ')[0], amt = +m.querySelector('[name=amount]').value || 0;
+    if (!desc) return toast('Гүйлгээний утга оруулна уу');
+    if (!acc) return warnModal('Данс сонгоно уу !');
+    if (!(amt > 0)) return warnModal('Дүн оруулна уу !');
+    const income = /орлог/.test(kind);
+    const row = {id: ++st.seq, desc, cust, acc, amount: amt, kind};
+    st.rows.push(row);
+    journals.push({id: ++jseq, desc, amount: amt, src: 'cash' + row.id,
+      lines: [{code: acc, name: '', debit: income ? amt : 0, credit: income ? 0 : amt, cust},
+              {code: '1201', name: 'Дансны авлага', debit: income ? 0 : amt, credit: income ? amt : 0, cust}]});
+    m.remove(); render();
+  };
+  document.body.appendChild(m);
+}
+MINI_DEFS.cashdoc = {cols: ['Баримтын төрөл', 'Гүйлгээний утга', 'Дебет - ₮'], fields: [], validate: () => '',
+  rowVals: (r) => [r.kind, r.desc, fmt(r.amount)], onDelete: (r) => dropJournal('cash' + r.id),
+  // Бодит: «Шинэ» → баримтын төрөл сонгох dropdown (HR «Тогтмол үйл ажиллагаа» шиг DOM)
+  addMenu: () => {
+    const mnu = $(`<dxbl-dropdown-dialog class="dxbl-dropdown-dialog dxbl-toolbar-dropdown"
+        style="display:block;position:fixed;top:60px;left:300px;background:#fff">
+      <ul><li class="mk"><span>Кассын орлогын ордер</span></li><li class="mk"><span>Кассын зарлагын ордер</span></li></ul></dxbl-dropdown-dialog>`);
+    mnu.querySelectorAll('.mk').forEach(it => it.onclick = () => { mnu.remove(); cashForm(it.textContent.trim()); });
+    document.body.appendChild(mnu);
+  }};
+
+let cbq = '', cbSnap = null;
+const custBalances = () => {
+  const out = {};
+  for (const j of journals) for (const l of j.lines || [])
+    if (l.code === '1201' && l.cust) out[l.cust] = (out[l.cust] || 0) + (+l.debit || 0) - (+l.credit || 0);
+  return Object.entries(out).map(([code, end]) => ({code, name: custName(code), end}));
+};
+function custBalView() {
+  if (!cbSnap) cbSnap = custBalances();
+  const v = $(`<div class="tab-body"></div>`);
+  const bar = $(`<div class="toolbar"><button class="dxbl-btn flt">Шүүх</button>
+    <span class="dxbl-grid-search-box"><input placeholder="Хайх..." value="${esc(cbq)}"></span></div>`);
+  bar.querySelector('.flt').onclick = () => { cbSnap = custBalances(); render(); };
+  const inp = bar.querySelector('input');
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { cbq = inp.value; render(); } };
+  v.appendChild(bar);
+  const t = $(`<table class="dxbl-grid"><thead><tr><th>Харилцагчийн код</th><th>Харилцагчийн нэр</th><th>Эхний үлдэгдэл</th><th>Эцсийн үлдэгдэл</th></tr></thead><tbody></tbody></table>`);
+  for (const r of cbSnap.filter(r => !cbq || (r.code + ' ' + r.name).toLowerCase().includes(cbq.toLowerCase())))
+    t.querySelector('tbody').appendChild($(`<table><tr role="row"><td>${esc(r.code)}</td><td>${esc(r.name)}</td><td></td><td>${fmt(r.end)}</td></tr></table>`).querySelector('tr'));
+  v.appendChild(t);
+  return v;
+}
+
 function miniView(kind) {
   const d = MINI_DEFS[kind], st = miniState(kind);
   const v = $(`<div class="tab-body"></div>`);
   const bar = $(`<div class="toolbar"><button class="dxbl-btn add">Нэмэх</button>
       <button class="dxbl-btn edit">Засах</button> <button class="dxbl-btn del">Устгах</button>
       <span class="dxbl-grid-search-box"><input placeholder="Хайх..." value="${esc(st.q)}"></span></div>`);
-  bar.querySelector('.add').onclick = () => miniForm(kind, null);
-  bar.querySelector('.edit').onclick = () => { const r = st.rows.find(x => x.id === st.sel); if (r) miniForm(kind, r); };
+  bar.querySelector('.add').onclick = () => d.addMenu ? d.addMenu() : d.form ? d.form(null) : miniForm(kind, null);
+  bar.querySelector('.edit').onclick = () => { const r = st.rows.find(x => x.id === st.sel); if (r) (d.form || ((x) => miniForm(kind, x)))(r); };
   bar.querySelector('.del').onclick = () => {
     const r = st.rows.find(x => x.id === st.sel); if (!r) return;
     if (d.locked && d.locked(r)) { warnModal('Батлагдсан баримтыг устгах боломжгүй'); return; }
@@ -1125,7 +1284,7 @@ function miniView(kind) {
     m.querySelector('.yes').onclick = () => {
       m.remove();
       if (d.deleteError) { warnModal(d.deleteError); return; }
-      const drop = () => { st.rows = st.rows.filter(x => x.id !== r.id); st.sel = null; render(); };
+      const drop = () => { if (d.onDelete) d.onDelete(r); st.rows = st.rows.filter(x => x.id !== r.id); st.sel = null; render(); };
       if (d.delay) setTimeout(drop, d.delay); else drop(); };
     document.body.appendChild(m);
   };
@@ -1152,7 +1311,7 @@ function miniView(kind) {
   if (d.tree) v.appendChild($(`<dxbl-tree-list class="dxbl-grid" style="display:block"><table><thead><tr><th>Нэр</th></tr></thead>
     <tbody>${d.tree.map(x => `<tr role="row"><td>${x}</td></tr>`).join('')}</tbody></table></dxbl-tree-list>`));
   const t = $(`<table class="dxbl-grid"><thead><tr>${d.cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody></tbody></table>`);
-  const vals = (r) => d.extraCols ? [r.number || '', ...d.fields.map(f => r[f.name] || ''), r.status || 'Ноорог']
+  const vals = (r) => d.rowVals ? d.rowVals(r) : d.extraCols ? [r.number || '', ...d.fields.map(f => r[f.name] || ''), r.status || 'Ноорог']
                                   : d.fields.map(f => r[f.name] || '').concat(d.computed ? d.computed(r) : []);
   for (const r of st.rows.filter(r => !r.hidden && !r.fresh && !d.ghost).filter(r => !st.q || vals(r).join(' ').toLowerCase().includes(st.q.toLowerCase()))) {
     const tr = $(`<table><tr role="row" class="${r.id === st.sel ? 'dxbl-grid-selected-row dxbl-grid-focused-row' : ''}">
@@ -1170,6 +1329,8 @@ function miniForm(kind, rec) {
     const val = esc(rec ? rec[f.name] || '' : '');
     if (f.kind === 'datecombo') return `<div class="dxbl-fl-item"><label class="dxbl-fl-cpt">${f.label}:</label><div class="dxbl-fl-ctrl">
         <span class="dxbl-combobox"><input name="${f.name}" role="combobox" value="${val}"><button class="dxbl-btn dd">▾</button></span></div></div>`;
+    if (f.kind === 'check') return `<div class="dxbl-fl-item"><label class="dxbl-fl-cpt">${f.label}:</label><div class="dxbl-fl-ctrl">
+        <input type="checkbox" name="${f.name}" ${rec && rec[f.name] ? 'checked' : ''}></div></div>`;
     if (f.kind === 'lookup') return `<div class="dxbl-fl-item"><label class="dxbl-fl-cpt">${f.label}:</label><div class="dxbl-fl-ctrl">
         <input name="${f.name}" value="${val}"><button class="dxbl-btn lk" data-f="${f.name}" data-src="${f.src}">...</button></div></div>`;
     return field(f.label, f.name, rec ? rec[f.name] : '');
@@ -1182,7 +1343,7 @@ function miniForm(kind, rec) {
   m.querySelector('.cancel').onclick = () => m.remove();
   m.querySelector('.save').onclick = () => {
     const v = {};
-    for (const f of d.fields) v[f.name] = m.querySelector(`[name=${f.name}]`).value.trim();
+    for (const f of d.fields) { const el = m.querySelector(`[name=${f.name}]`); v[f.name] = f.kind === 'check' ? el.checked : el.value.trim(); }
     const err = d.validate(v);
     if (err) { toast(err); return; }
     if (rec) { if (d.onUpdate) d.onUpdate(rec, v); Object.assign(rec, v); }

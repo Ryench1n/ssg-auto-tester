@@ -99,11 +99,29 @@ def _norm(s) -> str:
     return re.sub(r"\s+", " ", str(s or "")).strip().lower()
 
 
+def _col_index(headers: list[str], column: str) -> int:
+    """Баганын индекс: «Эцсийн үлдэгдэл|Үлдэгдэл» — хувилбаруудыг дарааллаар (яг ижил, эс бөгөөс агуулсан)."""
+    hs = [_norm(h) for h in headers]
+    for alt in [a for a in str(column).split("|") if a.strip()] or [""]:
+        c = _norm(alt)
+        idx = hs.index(c) if c in hs else next((i for i, h in enumerate(hs) if c and c in h), -1)
+        if idx >= 0:
+            return idx
+    return -1
+
+
+def _want_columns(rows_spec: dict) -> list[str]:
+    """READ_GRID_JS-д: хүссэн баганууд (хувилбар бүрийг тусад нь) — grid сонгоход."""
+    out: list[str] = []
+    for x in rows_spec.values():
+        for k in ("column", "minus"):
+            out += [a.strip() for a in str(x.get(k) or "").split("|") if a.strip()]
+    return out
+
+
 def pick_value(headers: list[str], rows: list[list[str]], match: str, column: str) -> tuple[float | None, str]:
     """Мөр (аль нэг нүд нь match-тай тэнцүү, эс бөгөөс агуулсан) × багана (толгой нь column) → (тоо, тайлбар)."""
-    hs = [_norm(h) for h in headers]
-    c = _norm(column)
-    idx = hs.index(c) if c in hs else next((i for i, h in enumerate(hs) if c in h), -1)
+    idx = _col_index(headers, column)
     if idx < 0:
         return None, f"«{column}» багана олдсонгүй (баганууд: {', '.join(headers[:12])})"
     m = _norm(match)
@@ -124,13 +142,7 @@ def sum_values(headers: list[str], rows: list[list[str]], match: str, column: st
                minus: str = "") -> tuple[float | None, str]:
     """match агуулсан БҮХ мөрийн Σ column (− Σ minus) — ж: ГД-ийн бичилтийн жагсаалтаас дансны үлдэгдэл
     (Σ Дебет − Σ Кредит). Таарах мөргүй бол 0."""
-    hs = [_norm(h) for h in headers]
-
-    def col(name: str) -> int:
-        c = _norm(name)
-        return hs.index(c) if c in hs else next((i for i, h in enumerate(hs) if c in h), -1)
-
-    i, j = col(column), (col(minus) if minus else -1)
+    i, j = _col_index(headers, column), (_col_index(headers, minus) if minus else -1)
     if i < 0 or (minus and j < 0):
         miss = column if i < 0 else minus
         return None, f"«{miss}» багана олдсонгүй (баганууд: {', '.join(headers[:12])})"
@@ -186,6 +198,7 @@ async def report_read(env, args: dict) -> dict:
       save_as: tb_before             # → ctx[tb_before] = {avlaga: 500000.0, …}
     """
     await ui.close_form(env)
+    by_match: dict[str, list] = {}           # search: match → тэр хайлтын мөрүүд
     await ui.clear_toasts(env)
     await ui.ensure_menu(env, args["menu"])
     words = (ui.fcfg(env).get("auto") or {})
@@ -216,22 +229,28 @@ async def report_read(env, args: dict) -> dict:
         # Жагсаалт (ж: «Данс» — Код, Үлдэгдэл): мөр бүрийг хайлтаар шүүж уншина (олон хуудастай жагсаалт)
         if args.get("refresh", True):
             await ui.reload_list(env)       # өмнө нээсэн таб — шинэ бичилт харагдахгүй байж болно
+        # Нэг match-ыг НЭГ удаа хайна; alias бүр зөвхөн өөрийн хайлтын мөрөөс тооцно — ижил match-тай хоёр alias
+        # (ж: sale_dt, sale_net) мөрийг давхар нэмж Σ-г 2 дахин өсгөж байсан (P2 mock, 2026-10-19)
         headers, rows = [], []
         for spec in (args.get("rows") or {}).values():
-            await ui.grid_find_settled(env, str(spec["match"]))
-            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), [str(x["column"]) for x in (args.get("rows") or {}).values()]])
+            m = str(spec["match"])
+            if m in by_match:
+                continue
+            await ui.grid_find_settled(env, m)
+            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), _want_columns(args.get("rows") or {})])
+            by_match[m] = (grid or {}).get("rows") or []
             if grid and grid["rows"]:
                 headers = grid["headers"]
                 rows += grid["rows"]
         if not rows and not all((x.get("agg") == "sum") for x in (args.get("rows") or {}).values()):
             raise StepBlocked("Жагсаалтаас хайсан мөр олдсонгүй — rows.match (дансны код)-ыг шалгана уу", category="tool")
         if not headers:      # нийлбэр, бичилтгүй (шинэ данс) — баганыг хоосон grid-ийн толгойноос
-            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), [str(x["column"]) for x in (args.get("rows") or {}).values()]])
+            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), _want_columns(args.get("rows") or {})])
             headers = (grid or {}).get("headers") or []
     else:
         grid = None
         for _ in range(int(args.get("wait_s", 10) * 2)):
-            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), [str(x["column"]) for x in (args.get("rows") or {}).values()]])
+            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), _want_columns(args.get("rows") or {})])
             if grid and grid["rows"]:
                 break
             await asyncio.sleep(0.5)
@@ -242,7 +261,8 @@ async def report_read(env, args: dict) -> dict:
     values, problems = {}, []
     for alias, spec in (args.get("rows") or {}).items():
         if spec.get("agg") == "sum":
-            v, why = sum_values(headers, rows, str(spec["match"]), str(spec["column"]), str(spec.get("minus") or ""))
+            own = by_match.get(str(spec["match"]), rows)
+            v, why = sum_values(headers, own, str(spec["match"]), str(spec["column"]), str(spec.get("minus") or ""))
         else:
             v, why = pick_value(headers, rows, str(spec["match"]), str(spec["column"]))
         if v is None:

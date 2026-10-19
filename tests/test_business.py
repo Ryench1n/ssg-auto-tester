@@ -259,3 +259,67 @@ def test_phase1_site_scenario_is_self_contained(tmp_path):
     assert "5101 Бусад орлого" in " ".join(by["Тест данс үүсгэх (кредит)"]["notes"])
     assert "НӨАТ=" not in " ".join(fl["steps"][3]["notes"])                 # толгойн НӨАТ бөглөөгүй
     assert "Гүйлгээний загвар" not in " ".join(fl["steps"][3]["notes"])
+
+
+P2_KEYS = {
+    "Мастер дата|Өглөг авлага|Харилцагч|customerlist": "Мастер дата|Бүртгэл|Харилцагчийн бүртгэл|/md/custm",
+    "Мастер дата|Бараа материал|Барааны жагсаалт|itemlist": "Мастер дата|Бүртгэл|Барааны бүртгэл|/md/itemm",
+    "Өглөг & Авлага|Жагсаалт|Харилцагчийн үлдэгдлийн жагсаалт /дансаар/|recpay/customerbalancelist":
+        "Мастер дата|Бүртгэл|Харилцагчийн үлдэгдэл|/md/custbal",
+    "Ерөнхий дэвтэр|Жагсаалт|Гүйлгээний жагсаалт|generalledger/journallist": JOURNAL_KEY,
+    "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist": "Мастер дата|Бүртгэл|Борлуулалтын жагсаалт|/md/sdoc",
+    "Мөнгөн хөрөнгө|Жагсаалт|Кассын баримтын жагсаалт|cashflow/cashdocumentlist":
+        "Мастер дата|Бүртгэл|Кассын баримтын жагсаалт|/md/cashdoc",
+}
+
+
+@e2e
+def test_phase2_order_to_cash_site_scenario_is_self_contained(tmp_path):
+    """testaccounting-ийн «P2» (config-оос, цэсний түлхүүрийг mock-ийнхоор сольж): тест харилцагч + үйлчилгээ →
+    зээлээр борлуулалт (авлага +1000, ГД-д тэнцвэртэй) → кассын орлого (төрөл сонгох цэсээр; авлага 0) → устгахад
+    Δ = 0 → мастер өгөгдөл устгана. Lookup-ийн эхний мөр бодит харилцагч / кассын данс байсан ч тестийнхийг сонгоно."""
+    import json as _json
+    from app.flows.engine import load_flow
+    site = load_config("https://testaccounting.smartapp.mn/")
+    spec = load_flow(site, "P2: Борлуулалт → Кассын орлого → Авлага")
+    text = _json.dumps(spec, ensure_ascii=False)
+    for real, mock in P2_KEYS.items():
+        text = text.replace(real, mock)
+    spec = _json.loads(text)
+    with CrudServer() as srv:
+        srv.state.e2e = True
+        cfg = load_config(srv.url, {**FAST, "flows": {"P2": spec}})
+        pipe = PipelineRunner("p2s", srv.url, cfg, RunOptions(project="T"), tmp_path,
+                              steps=[{"kind": "crud", "flow": "P2"}], headless=True,
+                              on_waiting_login=HumanLogin("admin", PASSWORD))
+        data = asyncio.run(pipe.run())
+    fl = data.flows[0]
+    assert fl["status"] == M.PASS, [(s["index"], s["name"], s["status"], s["message"][:200], s["notes"][-2:])
+                                    for s in fl["steps"] if s["status"] != M.PASS]
+    d = fl["data"]
+    assert d["a0"] == {"ar": 0.0} and d["a1"] == {"ar": 1000.0} and d["a2"] == d["a3"] == d["a0"]
+    assert d["s1"] == {"total": 1000.0}
+    assert d["g1"] == {"sale_dt": 1000.0, "sale_net": 0.0, "pay_dt": 1000.0, "pay_net": 0.0} and d["g2"] == d["g0"]
+    by = {s["name"]: s for s in fl["steps"]}
+    sale = " ".join(by["Борлуулалт: тест харилцагчид зээлээр, 1 × 1000₮"]["notes"])
+    assert "Бодит харилцагч" not in sale and "1201 Дансны авлага" in sale, sale       # зээлээр, тест харилцагч
+    assert "Тоо хэмжээ=1" in sale and "Нэгж үнэ=1000" in sale and "Сав баглааны" not in sale, sale
+    assert "Үйлчилгээ" in " ".join(by["Тест үйлчилгээ (бараа) үүсгэх — 1000₮"]["notes"])
+    for name in ("Цэвэрлэх: тест үйлчилгээ", "Цэвэрлэх: тест харилцагч"):
+        assert "Устгав" in " ".join(by[name]["notes"]), (name, by[name]["notes"])
+
+
+def test_explicit_values_and_optional_prefer_follow_form_order():
+    """values: заавал биш талбарт ч (checkbox → bool), түлхүүрийг дарахгүй; prefer: заавал биш lookup-ийг сонголтод
+    нэмнэ (формын дарааллаар); формд алга шошгыг мэдээлнэ."""
+    from app.flows.steps.auto import apply_explicit
+    f = lambda label, **k: {"label": label, "tag": "input", "type": k.get("type", "text"), "lookup": k.get("lookup", False),
+                            "combo": False, "required": k.get("req", False)}
+    fields = [f("Харилцагч", lookup=True), f("Гүйлгээний утга", req=True), f("Данс", lookup=True, req=True),
+              f("Худалдах үнэ"), f("Борлуулах бараа эсэх", type="checkbox")]
+    values, picks, unresolved, skipped = apply_explicit(
+        fields, {"Гүйлгээний утга": "T S14"}, ["Данс"], [], "Гүйлгээний утга",
+        {"Худалдах үнэ": "1000", "Борлуулах бараа эсэх": "true", "Гүйлгээний утга": "X", "Байхгүй": "1"},
+        {"Харилцагч": "T11", "Данс": "авлага"})
+    assert values == {"Гүйлгээний утга": "T S14", "Худалдах үнэ": "1000", "Борлуулах бараа эсэх": True}
+    assert picks == ["Харилцагч", "Данс"] and skipped == ["Байхгүй"] and unresolved == []

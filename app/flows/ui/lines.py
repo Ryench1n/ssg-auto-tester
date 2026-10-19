@@ -112,13 +112,18 @@ async def _fill_cell(env: "FlowEngine", i: int, value: str) -> bool:
     return True
 
 
+def _hnorm(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").replace("*", "")).strip().lower()
+
+
 DEBIT_WORDS = ["дебет", "debit"]
 CREDIT_WORDS = ["кредит", "credit"]
 QTY_WORDS = ["тоолсон", "тоо ширхэг", "тоо", "хэмжээ", "дүн", "үнэ", "qty", "quantity", "amount"]
 COMPUTED_WORDS = ["үлдэгдэл", "зөрүү", "нийт", "balance", "total"]
 
 
-async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] | None = None) -> dict | None:
+async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] | None = None,
+                     cells: dict[str, str] | None = None) -> dict | None:
     """Формын мөрийн grid-д мөр нэмж бөглөнө. Grid байхгүй бол None.
 
     - Эхний lookup багана (Дансны код / Барааны код) — lookup-оос эхний утгыг сонгоно.
@@ -126,7 +131,10 @@ async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] |
     - Эс бөгөөс тоо хэмжээ/дүнгийн баганад amount (тооцоолдог үлдэгдэл/зөрүү баганыг хөндөхгүй).
     accounts: мөр бүрийн lookup-оос сонгох утга (журнал: [дебетийн данс, кредитийн данс]) — заагаагүй бол эхний мөр.
     Бизнес процессын E2E-д Δ-г тодорхой дансаар шалгахад (хоёр мөр ижил данс бол Δ = 0 болно).
+    cells: {баганын нэр: утга} — тоон баганыг таахын оронд яг эдгээрийг бөглөнө (борлуулалт: «Тоо хэмжээ»,
+    «Нэгж үнэ» — «Сав баглааны тоо» мэт өөр «тоо» баганад бичихээс сэргийлнэ). Нэг мөр.
     Буцаах: {"lines": [...тайлбар], "error": ""}"""
+    cells_spec = dict(cells or {})
     info = await env.page.evaluate(MARK_LINES_ADD_JS, [sel_payload(env)])
     if not info:
         # Мөрийн grid формын өөр таб дээр байж болно («Данс» / «Бусад» — Accounting журнал)
@@ -149,7 +157,7 @@ async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] |
         return None
 
     dcol, ccol = col(DEBIT_WORDS), col(CREDIT_WORDS)
-    targets = [dcol, ccol] if dcol is not None and ccol is not None else [None]
+    targets = [dcol, ccol] if dcol is not None and ccol is not None and not cells_spec else [None]
     lines: list[str] = []
     for n_line, target in enumerate(targets):
         want = str((accounts or [])[n_line]) if accounts and n_line < len(accounts) else ""
@@ -177,6 +185,24 @@ async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] |
             env._line_hint = picked.split()[0] if picked.split() else ""
             await asyncio.sleep(0.4)
             cells = await _edit_row(env) or cells
+        if cells_spec:
+            for col_name, value in cells_spec.items():
+                want_h = _hnorm(col_name)
+                k = next((i for i, h in enumerate(headers) if _hnorm(h) == want_h), None)
+                if k is None:
+                    k = next((i for i, h in enumerate(headers) if want_h in _hnorm(h)), None)
+                if k is None:
+                    return {"lines": lines, "error": f"мөрийн grid-д «{col_name}» багана алга "
+                                                     f"(баганууд: {', '.join(h for h in info['headers'] if h)[:200]})"}
+                level = await dialog_count(env)
+                if not await _fill_cell(env, k, str(value)):
+                    return {"lines": lines, "error": f"'{name(k)}' нүдэнд утга оруулж чадсангүй"}
+                if await dialog_count(env) > level:
+                    await close_form(env, keep=level)
+                    return {"lines": lines, "error": f"'{name(k)}' нүдэнд бичихэд сонголтын цонх нээгдлээ"}
+                part.append(f"{name(k)}={value}")
+            lines.append(", ".join(part))
+            continue
         # Lookup (код) багана тоон утгатай (1001) ч тоо хэмжээ биш — бичвэл хайлтын цонх нээгдэнэ
         numeric = {c["i"] for c in cells if c["numeric"] and not c["command"] and not c["lookup"]
                    and (lk is None or c["i"] != lk["i"])}

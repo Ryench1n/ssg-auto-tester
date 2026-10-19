@@ -116,6 +116,12 @@ def make_handler(state: CrudState):
                 extra += "{name: 'Гүйлгээ баланс', href: '/rv/trialbalance', kind: 'tb'},"
                 extra += "{name: 'Дансны жагсаалт', href: '/md/acclist', kind: 'acclist'},"
                 extra += "{name: 'Дансны бүртгэл', href: '/md/accm', kind: 'accm'},"
+                # Үе 2: Order-to-Cash
+                extra += "{name: 'Харилцагчийн бүртгэл', href: '/md/custm', kind: 'custm'},"
+                extra += "{name: 'Барааны бүртгэл', href: '/md/itemm', kind: 'itemm'},"
+                extra += "{name: 'Борлуулалтын жагсаалт', href: '/md/sdoc', kind: 'sdoc'},"
+                extra += "{name: 'Кассын баримтын жагсаалт', href: '/md/cashdoc', kind: 'cashdoc'},"
+                extra += "{name: 'Харилцагчийн үлдэгдэл', href: '/md/custbal', kind: 'custbal'},"
             html = html.replace(b"/*EXTRA_ITEMS*/", extra.encode())
             return self._send(200, html, "text/html; charset=utf-8")
 

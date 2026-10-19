@@ -165,6 +165,42 @@ def plan_values(fields: list[dict], tag: str, auto_cfg: dict, uid: str = "",
     return values, (key_f["label"] if key_f else ""), picks, unresolved
 
 
+def _field_for(fields: list[dict], label: str) -> dict | None:
+    n = re.sub(r"\s+", " ", label.replace("*", "")).strip().lower()
+    norm = lambda f: re.sub(r"\s+", " ", (f.get("label") or "").replace("*", "")).strip().lower()
+    return next((f for f in fields if norm(f) == n), None) or next((f for f in fields if n and n in norm(f)), None)
+
+
+def apply_explicit(fields: list[dict], values: dict, picks: list[str], unresolved: list[str], key: str,
+                   explicit: dict, prefer: dict) -> tuple[dict, list[str], list[str], list[str]]:
+    """Сценарийн заасан утгууд (values) ба сонголтууд (prefer) — заавал БИШ талбарт ч хэрэглэнэ (ж: борлуулалтын
+    «Харилцагч» = тест харилцагч, барааны «Худалдах үнэ»). Түлхүүр (run_tag) талбарыг дарж бичихгүй.
+    Буцаах: (values, picks — формын дарааллаар, unresolved, формд олдоогүй шошгууд)."""
+    values, unresolved, skipped = dict(values), list(unresolved), []
+    for label, value in explicit.items():
+        f = _field_for(fields, str(label))
+        if f is None:
+            skipped.append(str(label))
+            continue
+        if f["label"] == key:
+            continue
+        v = str(value)
+        values[f["label"]] = (v.lower() == "true") if v.lower() in ("true", "false") else v
+        if f["label"] in unresolved:
+            unresolved.remove(f["label"])
+        if f["label"] in picks:
+            picks = [p for p in picks if p != f["label"]]
+    want_pick = set(picks)
+    for label in prefer:
+        f = _field_for(fields, str(label))
+        if f is None:
+            skipped.append(str(label))
+        elif f["label"] not in values and (f["tag"] == "select" or f.get("combo") or f.get("lookup")):
+            want_pick.add(f["label"])
+    order = [f["label"] for f in fields if f["label"] in want_pick]
+    return values, list(dict.fromkeys(order + [p for p in picks if p not in order])), unresolved, skipped
+
+
 async def wait_opened(env, before: int, tabs_before: list[str], menus: bool = True,
                       timeout_s: float | None = None) -> tuple[str, list[str], list[str]]:
     """Товч (Нэмэх/Шинэ/Засах) дарсны дараа юу нээгдсэнийг хүлээнэ:
@@ -190,8 +226,12 @@ async def auto_create(env, args: dict) -> dict:
     """with: {menu: <цэсний түлхүүр/зам>, save_as: a01_rec, field_as: a01_field,
               try_as: a01_try,      # хадгалахын ӨМНӨ ctx-д бичнэ — Fail болсон ч цэвэрлэгээ хайж устгана
               values_as: a01_vals,  # бөглөсөн утгууд — засварын дараа дахин нээж шалгахад (crud.auto_verify)
-              prefer: {Ажилтан: "<мастер бичлэгийн утга>"},   # lookup-д энэ бичлэгийг сонгоно
-              lines: {debit: "1001", credit: "5101", amount: "1"}}  # мөрийн grid: данс бүрийг заах (E2E Δ)"""
+              prefer: {Ажилтан: "<мастер бичлэгийн утга>"},   # lookup-д энэ бичлэгийг сонгоно (заавал биш
+                                                              # талбарт ч — ж: борлуулалтын «Харилцагч»)
+              values: {"Худалдах үнэ": "1000"},   # тодорхой утга (заавал биш талбарт ч); формд алга бол алгасна
+              add_menu: "Кассын орлогын ордер",   # «Шинэ» нь төрөл сонгох цэстэй бол энэ зүйлийг сонгоно
+              lines: {debit: "1001", credit: "5101", amount: "1"}}  # мөрийн grid: данс бүрийг заах (E2E Δ)
+              # эсвэл барааны мөр: {item: "{run_tag}12", cells: {"Тоо хэмжээ": "1", "Нэгж үнэ": "1000"}}"""
     tag = env.ctx.run_tag
     add, delete = ui.buttons(env, "add"), ui.buttons(env, "delete")
     await ui.ensure_menu(env, args["menu"])
@@ -205,6 +245,17 @@ async def auto_create(env, args: dict) -> dict:
     opened, new_tabs, menu_items = await wait_opened(env, before, tabs_before)
     env.run.meta["opened"] = opened or "nothing"
     try:
+        if opened == "menu" and args.get("add_menu"):
+            want = str(args["add_menu"])
+            item = next((m for m in menu_items if m.strip() == want), None) or \
+                next((m for m in menu_items if want.lower() in m.lower()), None)
+            safe, _ = ui.safe_type_items(env, [item] if item else [])
+            if not safe or not await ui.click_popup_item(env, safe[0]):
+                raise StepBlocked(f"«{' / '.join(add)}» цэсэнд «{want}» алга ({', '.join(menu_items[:8])})",
+                                  skip_flow=True, category="tool")
+            menu_items = []
+            opened, new_tabs, _ = await wait_opened(env, before, tabs_before, menus=False)
+            env.run.meta["opened"] = opened or "nothing"
         if opened == "menu":
             raise StepBlocked(f"«{' / '.join(add)}» нь төрөл сонгох цэстэй ({', '.join(menu_items[:8])}) — "
                               "автоматаар сонгохгүй; YAML flow бичнэ үү", skip_flow=True)
@@ -220,7 +271,12 @@ async def auto_create(env, args: dict) -> dict:
                               "боловч талбарын шошго илэрсэнгүй — оношлогоог тайлангаас харна уу", skip_flow=True)
         values, key, picks, unresolved = plan_values(fields, tag, ui.fcfg(env).get("auto") or {},
                                                      _uid(args), args.get("columns"))
-        meta_fields = {l: v.replace(tag, "{run_tag}") for l, v in values.items()}
+        values, picks, unresolved, skipped = apply_explicit(fields, values, picks, unresolved, key,
+                                                            args.get("values") or {}, args.get("prefer") or {})
+        if skipped:
+            env.note("Формд алга (алгасав): " + ", ".join(skipped))
+        meta_fields = {l: str(v).replace(tag, "{run_tag}") for l, v in values.items()}
+        prefer_by = {(_field_for(fields, str(k)) or {}).get("label", k): v for k, v in (args.get("prefer") or {}).items()}
         env.run.meta.update(fields={**meta_fields, **{l: "TODO" for l in picks + unresolved}}, key=key)
         if unresolved:
             raise StepBlocked(f"Заавал талбарыг автоматаар бөглөх боломжгүй: {', '.join(unresolved)} "
@@ -245,14 +301,18 @@ async def auto_create(env, args: dict) -> dict:
         for label in picks:                    # формын дарааллаар (хамааралтай lookup)
             info = await ui.find_field(env, label)
             current = (info.get("value") or "").strip()
-            if current:
+            mine = str(prefer_by.get(label) or "")
+            if current and not (tag in mine and tag not in current):   # тестийн бичлэг заасан бол анхдагчийг солино
                 # Өмнөх сонголтоор систем автоматаар бөглөсөн (ж: Дансны төрөл → Дансны бүлэг) — хөндөхгүй
                 picked[label] = current
                 env.run.meta["fields"][label] = f"(автоматаар бөглөгдсөн: {current[:60]})"
                 continue
-            val = await ui.pick_option(env, label, want=str((args.get("prefer") or {}).get(label) or ""))
+            val = await ui.pick_option(env, label, want=str(prefer_by.get(label) or ""))
             if await ui.dialog_count(env) > form_level:
                 await ui.close_form(env, keep=form_level)
+            if not val and tag in mine:
+                raise StepBlocked(f"'{label}' сонголтод тестийн «{mine}» бичлэг олдсонгүй — бодит бичлэгээр "
+                                  "орлуулаагүй (өмнөх алхам үүсгэсэн эсэхийг шалгана уу)", skip_flow=True, category="tool")
             if not val and info.get("readonly"):
                 continue        # идэвхгүй (disabled) сонголт — хадгалах үеийн анхааруулга шийднэ
             if not val:
@@ -375,13 +435,17 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
                 acted = True
         # Мөр бөглөсний дараах анхааруулга мөрийн тухай (ж: «Уг дансны төрлөөр кредит бичилт…») — заавал биш толгойн
         # талбар (НӨАТ, мөнгөн гүйлгээ …) бөглөвөл шинэ алдаа үүсгэнэ (testaccounting журнал, 2026-10-19)
-        if not acted and not tried_optional and not tried_lines and not ui.validation_targets(message, titles):
+        # Сценари мөрийг заасан (lines) бол «мэдээлэл дутуу» нь эхлээд мөрийн тухай — заавал биш талбар (Борлуулагч,
+        # Гэрээ …) таамаглаж бөглөхгүй
+        if not acted and not tried_optional and not tried_lines and not line_spec \
+                and not ui.validation_targets(message, titles):
             tried_optional = True
             acted = await _fill_optional(env, form_level, words, values, picked)
         if not acted and not tried_lines:
             tried_lines = True
             res = await ui.fill_lines(env, str(line_spec.get("amount") or "1"),
-                                      [line_spec[k] for k in ("debit", "credit") if line_spec.get(k)] or None)
+                                      [line_spec[k] for k in ("debit", "credit", "item") if line_spec.get(k)] or None,
+                                      cells=line_spec.get("cells") or None)
             if res is not None:
                 env.run.meta["lines"] = res["lines"]
                 if res["error"]:

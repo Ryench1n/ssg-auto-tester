@@ -120,68 +120,148 @@ flows:
         always: true
         with: {menu: "Мастер дата|Ерөнхий дэвтэр|Данс|accountlist", data: c02}
 
-  # ---------------------------------------------------------------- Бизнес процессын E2E (Үе 2: Order-to-Cash)
-  # Бэлтгэл (нэг удаа, тест орчинд):
-  #   1. Доорх e2e.vars-ийг тест компанийн утгаар бөглөнө (данс, дүн, тайлант үе).
-  #   2. UI «🎥 Урсгал бичих»-ээр хоёр бүрэлдэхүүн бичнэ: «Борлуулалт бүртгэх» (Гүйлгээний утга = {run_tag} …,
-  #      харилцагч, бараа, тоо {sale_qty}, үнэ) ба «Кассын орлого бүртгэх» (тэр харилцагчаас {sale_total}).
-  #   3. Эхний ажиллуулалтаар тайлангийн багана/мөрийг (report.read rows) баталгаажуулна (калибровк).
-  # Бүрэлдэхүүн бичигдээгүй / vars бөглөөгүй бол UI-д шалтгаантайгаа идэвхгүй харагдана.
-  "O2C: Борлуулалт → Касс → Гүйлгээ баланс":
+  # ---------------------------------------------------------------- Үе 2: Order-to-Cash (Борлуулалт → Касс)
+  # Бие даасан (P1 шиг): тест өөрийн харилцагч ({run_tag}11), үйлчилгээ ({run_tag}12, 1000₮)-г үүсгэж, тэр харилцагчид
+  # зээлээр борлуулаад кассын орлогоор төлүүлнэ. Oracle:
+  #   - Харилцагчийн үлдэгдэл (/дансаар/ — «Эцсийн үлдэгдэл»): борлуулалтын дараа +1000, төлбөрийн дараа 0
+  #   - Борлуулалтын жагсаалтын «Нийт дүн» = тоо × үнэ (1 × 1000)
+  #   - ГД-ийн бичилт: баримт бүр ГД-д тэнцвэртэй (Σ Дебет = Σ Кредит = 1000) бичигдсэн
+  # Цэвэрлэгээ (always): кассын орлого → борлуулалт → (Δ = 0) → бараа → харилцагч. Бодит харилцагч/бараанд хүрэхгүй:
+  # run_tag-тай сонголт олдохгүй бол бодит бичлэгээр ОРЛУУЛАХГҮЙ (Blocked).
+  "P2: Борлуулалт → Кассын орлого → Авлага":
     type: e2e
-    code: O2C
-    description: "Борлуулалт (авлага үүснэ) → кассын орлого (авлага хаагдана) → Гүйлгээ балансаар Δ → цуцалж Δ = 0"
+    code: P2
+    description: "Тест харилцагч + үйлчилгээ → зээлээр борлуулалт (авлага +1000, ГД-д бичигдсэн) → кассын орлого (авлага 0) → цуцлахад Δ = 0"
     steps:
-      - &tb
+      - uses: crud.auto_create
+        name: "Тест харилцагч үүсгэх"
+        with: {menu: "Мастер дата|Өглөг авлага|Харилцагч|customerlist", save_as: k11_rec, field_as: k11_field, try_as: k11_try,
+               values: {"Борлуулалтын харилцагч эсэх": "true"}}
+      - uses: crud.auto_create
+        name: "Тест үйлчилгээ (бараа) үүсгэх — 1000₮"
+        with: {menu: "Мастер дата|Бараа материал|Барааны жагсаалт|itemlist", save_as: i12_rec, field_as: i12_field, try_as: i12_try,
+               prefer: {"Төрөл": "Үйлчилгээ"},          # үлдэгдэл, өртөг шаардахгүй
+               values: {"Худалдах үнэ": "1000", "Борлуулах бараа эсэх": "true"}}
+      - &ar
         uses: report.read
-        name: "Гүйлгээ баланс — эхний төлөв"
-        with: &tbw
-          menu: "Ерөнхий дэвтэр / Тайлан / Гүйлгээ баланс"
-          params: {"Эхлэх огноо": "{period_from}", "Дуусах огноо": "{today}"}
-          run: ["Шүүх"]
-          mode: export                      # report viewer — «Файл үүсгэх» → Excel файлаас уншина
-          export: ["Файл үүсгэх", "Excel"]
+        name: "Харилцагчийн авлага — эхний төлөв"
+        with: &arw
+          menu: "Өглөг & Авлага|Жагсаалт|Харилцагчийн үлдэгдлийн жагсаалт /дансаар/|recpay/customerbalancelist"
+          search: true
           rows:
-            avlaga: {match: "{acc_receivable}", column: "Эцсийн үлдэгдэл"}
-            orlogo: {match: "{acc_revenue}", column: "Эцсийн үлдэгдэл"}
-            kass: {match: "{acc_cash}", column: "Эцсийн үлдэгдэл"}
-          save_as: tb0
-      - include: "rec: Борлуулалт бүртгэх"
-      - uses: doc.number
-        name: "Борлуулалтын баримтын дугаар"
-        with: {menu: "Борлуулалт / Жагсаалт / Борлуулалтын жагсаалт", find: "{run_tag}", column: "№", save_as: sale_no}
-      - <<: *tb
-        name: "Гүйлгээ баланс — борлуулалтын дараа"
-        with: {<<: *tbw, save_as: tb1}
+            ar: {match: "{run_tag}11", column: "Эцсийн үлдэгдэл", agg: sum}
+          save_as: a0
+      - &gl
+        uses: report.read
+        name: "ГД-ийн бичилт (тест баримтууд) — эхний төлөв"
+        with: &glw
+          menu: "Ерөнхий дэвтэр|Жагсаалт|Гүйлгээний жагсаалт|generalledger/journallist"
+          search: true
+          rows:
+            sale_dt: {match: "{run_tag} S14", column: "Дебет", agg: sum}
+            sale_net: {match: "{run_tag} S14", column: "Дебет", minus: "Кредит", agg: sum}
+            pay_dt: {match: "{run_tag} R15", column: "Дебет", agg: sum}
+            pay_net: {match: "{run_tag} R15", column: "Дебет", minus: "Кредит", agg: sum}
+          save_as: g0
+      - &sl
+        uses: report.read
+        name: "Борлуулалтын дүн — эхний төлөв"
+        with: &slw
+          menu: "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist"
+          search: true
+          rows:
+            total: {match: "{run_tag} S14", column: "Нийт дүн", agg: sum}
+          save_as: s0
+      - uses: crud.auto_create
+        name: "Борлуулалт: тест харилцагчид зээлээр, 1 × 1000₮"
+        with:
+          menu: "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist"
+          save_as: s14_rec
+          field_as: s14_field
+          try_as: s14_try
+          prefer: {"Харилцагч": "{run_tag}11", "Данс": "авлага&!валют"}    # зээлээр — авлагын данс
+          lines: {item: "{run_tag}12", cells: {"Тоо хэмжээ": "1", "Нэгж үнэ": "1000"}}
+      - uses: crud.search
+        name: "Борлуулалт жагсаалтад харагдах"
+        with: {menu: "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist", text: "{s14_rec}"}
+      - <<: *sl
+        name: "Борлуулалтын дүн — бүртгэсний дараа"
+        with: {<<: *slw, save_as: s1}
       - uses: assert.delta
-        name: "Борлуулалт: авлага өсч, орлого бичигдсэн"
-        with: {before: tb0, after: tb1, expect: {avlaga: "{sale_total}", orlogo: "-{sale_net}", kass: 0}}
-      - include: "rec: Кассын орлого бүртгэх"
-      - <<: *tb
-        name: "Гүйлгээ баланс — төлбөрийн дараа"
-        with: {<<: *tbw, save_as: tb2}
+        name: "Борлуулалтын нийт дүн = тоо × үнэ (1000)"
+        with: {before: s0, after: s1, expect: {total: 1000}}
+      - <<: *ar
+        name: "Харилцагчийн авлага — борлуулалтын дараа"
+        with: {<<: *arw, save_as: a1}
       - uses: assert.delta
-        name: "Төлбөр: авлага хаагдаж, касс өссөн"
-        with: {before: tb0, after: tb2, expect: {avlaga: 0, orlogo: "-{sale_net}", kass: "{sale_total}"}}
-      # Цэвэрлэгээ (always) — урвуу дарааллаар устгаж, тайлан анхны төлөвтөө буцсаныг шалгана
+        name: "Борлуулалт: харилцагчийн авлага +1000"
+        with: {before: a0, after: a1, expect: {ar: 1000}}
+      - uses: crud.auto_create
+        name: "Кассын орлого: тест харилцагчаас 1000₮"
+        with:
+          menu: "Мөнгөн хөрөнгө|Жагсаалт|Кассын баримтын жагсаалт|cashflow/cashdocumentlist"
+          add_menu: "Кассын орлогын ордер"
+          save_as: r15_rec
+          field_as: r15_field
+          try_as: r15_try
+          prefer: {"Харилцагч": "{run_tag}11"}
+          values: {"Дүн": "1000"}
+          lines: {amount: "1000"}
+      - <<: *ar
+        name: "Харилцагчийн авлага — төлбөрийн дараа"
+        with: {<<: *arw, save_as: a2}
+      - uses: assert.delta
+        name: "Төлбөр: харилцагчийн авлага хаагдсан (Δ = 0)"
+        with: {before: a0, after: a2, expect: {ar: 0}}
+      - <<: *gl
+        name: "ГД-ийн бичилт — борлуулалт, төлбөрийн дараа"
+        with: {<<: *glw, save_as: g1}
+      - uses: assert.delta
+        name: "ГД: баримт бүр 1000₮-өөр тэнцвэртэй бичигдсэн"
+        with: {before: g0, after: g1, expect: {sale_dt: 1000, sale_net: 0, pay_dt: 1000, pay_net: 0}}
+      # ---- цэвэрлэгээ (always): урвуу дарааллаар
       - uses: crud.delete
-        name: "Цэвэрлэх: кассын орлого"
+        name: "Цэвэрлэх: кассын орлого устгах"
         always: true
-        with: {menu: "Мөнгөн хөрөнгө / Жагсаалт / Кассын баримтын жагсаалт", find: "{run_tag}"}
+        with: {menu: "Мөнгөн хөрөнгө|Жагсаалт|Кассын баримтын жагсаалт|cashflow/cashdocumentlist", find: "{r15_rec}"}
       - uses: crud.delete
-        name: "Цэвэрлэх: борлуулалт"
+        name: "Цэвэрлэх: борлуулалт устгах"
         always: true
-        with: {menu: "Борлуулалт / Жагсаалт / Борлуулалтын жагсаалт", find: "{run_tag}"}
-      - <<: *tb
-        name: "Гүйлгээ баланс — цэвэрлэгээний дараа"
+        with: {menu: "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist", find: "{s14_rec}"}
+      - <<: *ar
+        name: "Харилцагчийн авлага — устгасны дараа"
         always: true
-        with: {<<: *tbw, save_as: tb3}
+        with: {<<: *arw, save_as: a3}
+      - <<: *gl
+        name: "ГД-ийн бичилт — устгасны дараа"
+        always: true
+        with: {<<: *glw, save_as: g2}
       - uses: assert.delta
-        name: "Цэвэрлэгээ: тайлан анхны төлөвтөө (Δ = 0)"
+        name: "Цэвэрлэгээ: авлага анхны төлөвтөө (Δ = 0)"
         always: true
-        with: {before: tb0, after: tb3, expect: {avlaga: 0, orlogo: 0, kass: 0}}
+        with: {before: a0, after: a3, expect: {ar: 0}}
+      - uses: assert.delta
+        name: "Цэвэрлэгээ: ГД-ийн бичилт буцаагдсан (Δ = 0)"
+        always: true
+        with: {before: g0, after: g2, expect: {sale_dt: 0, sale_net: 0, pay_dt: 0, pay_net: 0}}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: кассын орлогын үлдэгдэл"
+        always: true
+        with: {menu: "Мөнгөн хөрөнгө|Жагсаалт|Кассын баримтын жагсаалт|cashflow/cashdocumentlist", data: r15}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: борлуулалтын үлдэгдэл"
+        always: true
+        with: {menu: "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist", data: s14}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: тест үйлчилгээ"
+        always: true
+        with: {menu: "Мастер дата|Бараа материал|Барааны жагсаалт|itemlist", data: i12}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: тест харилцагч"
+        always: true
+        with: {menu: "Мастер дата|Өглөг авлага|Харилцагч|customerlist", data: k11}
 
-# Тест компанийн утгууд (Үе 1-A) — бөглөнө үү. Бодит компани/үе дээр хэзээ ч ажиллуулахгүй.
+# Тест компанийн утгууд — P1/P2 бие даасан (өөрийн данс/харилцагч/бараа үүсгэдэг) тул заавал биш.
 e2e:
   vars:
     period_from: "2026-01-01"
