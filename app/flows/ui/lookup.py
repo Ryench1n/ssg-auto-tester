@@ -93,8 +93,11 @@ async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True,
         deadline = time.monotonic() + fcfg(env).get("lookup_timeout_ms", 12000) / 1000
         while time.monotonic() < deadline:
             row = await page.evaluate(MARK_LOOKUP_ROW_JS, [sel_payload(env), want])
-            if want and not want.startswith("!") and not row and not searched:
-                searched = await _lookup_search(env, want)       # цонхны хайлтаар шүүгээд дахин үзнэ
+            if want and not row and not searched:
+                # цонхны хайлтаар шүүгээд дахин үзнэ (нөхцөлт сонголт — эхний эерэг үгээр; эерэг үггүй бол хайхгүй)
+                text = want if not ("&" in want or want.startswith("!")) else next(
+                    (t.strip() for t in want.split("&") if t.strip() and not t.strip().startswith("!")), "")
+                searched = await _lookup_search(env, text) if text else True
                 continue
             if row:
                 break

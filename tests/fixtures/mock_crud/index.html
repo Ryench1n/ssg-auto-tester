@@ -658,6 +658,8 @@ function journalForm(rec, host) {
     const desc = m.querySelector('[name=desc]').value.trim(), amount = +m.querySelector('[name=amount]').value || 0;
     const auxCodes = ((MINI.accm || {}).rows || []).filter(r => /Туслахтай/.test(r.type || '')).map(r => r.code);
     if (lines.some(l => auxCodes.includes(l.code))) return warnModal('Нийт дүн 0 эсвэл дебет болон кредит дүн зөрүүтэй байна !');
+    const vatCodes = ((MINI.accm || {}).rows || []).filter(r => /НӨАТ/.test(r.type || '')).map(r => r.code);
+    if (lines.some(l => vatCodes.includes(l.code))) return warnModal('НӨАТ-ын үзүүлэлт оруулна уу!');
     if (!desc) { toast('Гүйлгээний утга оруулна уу'); return; }
     if (lines.some(l => !l.code)) {    // бодит: данс сонгоогүй (хоосон) мөр байвал хадгалахгүй
       const w = $(`<div class="dxbl-modal err" role="dialog"><div>Хадгалах боломжгүй байна</div><div>Данс сонгогдоогүй байна.</div>
@@ -1073,7 +1075,9 @@ const accBal = (code) => (ACC_BASE[code] || 0) + journals.reduce((a, j) =>
   a + (j.lines || []).filter(l => l.code === code).reduce((b, l) => b + (+l.debit || 0) - (+l.credit || 0), 0), 0);
 // «Дансны төрөл»: бодит SmartApp шиг эхний мөр «Туслахтай» (туслах бүртгэлтэй) — ийм дансаар журнал хадгалахад
 // мөрийн дүн бүртгэгдэхгүй: «Нийт дүн 0 эсвэл дебет болон кредит дүн зөрүүтэй байна !» (testaccounting 2026-10-19)
-MINI.acctypes = {rows: [{id: 1001, name: 'Касс дахь мөнгө Туслахтай'}, {id: 1201, name: 'Авлага'}], seq: 0, q: '', sel: null};
+// testaccounting-ийн бодит жагсаалт шиг: туслахтай, татварын (НӨАТ) төрөл эхэнд; энгийн зардлын төрөл доор
+MINI.acctypes = {rows: [{id: 1001, name: 'Касс дахь мөнгө Туслахтай'}, {id: 1202, name: 'НӨАТ - ын авлага'},
+                        {id: 1201, name: 'Дансны авлага Туслахтай'}, {id: 7001, name: 'Бусад зардал'}], seq: 0, q: '', sel: null};
 MINI_DEFS.accm = {cols: ['Код', 'Нэр', 'Үлдэгдэл'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'},
                                                             {label: 'Дансны төрөл *', name: 'type', kind: 'lookup', src: 'acctypes'}],
   validate: (v) => !v.code ? 'Код оруулна уу' : !v.name ? 'Нэр оруулна уу' : !v.type ? 'Дансны төрөл сонгоно уу' : '',

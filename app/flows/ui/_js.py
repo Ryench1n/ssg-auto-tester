@@ -242,10 +242,14 @@ MARK_LOOKUP_ROW_JS = r"""
     .filter(r => { const t = __txt(r).replace(/\s+/g, ' ').trim();
                    return t && !empty.test(t) && /[^\d\s.,\-]/.test(t); });
   let row = null;
-  const avoid = want && want.startsWith('!') ? __norm(want.slice(1)) : '';
+  // Нөхцөлт сонголт: «зардал&!Туслахтай&!татвар» — эерэг үг бүрийг агуулсан, «!» үгийг агуулаагүй эхний мөр
+  const isPattern = !!want && (want.startsWith('!') || want.includes('&'));
+  const toks = isPattern ? want.split('&').map(t => t.trim()).filter(Boolean) : [];
+  const pos = toks.filter(t => !t.startsWith('!')).map(__norm), neg = toks.filter(t => t.startsWith('!')).map(t => __norm(t.slice(1)));
+  const avoid = isPattern;
   if (avoid) {
-    // «!Туслахтай» — тэр текстгүй эхний мөр (туслах бүртгэлтэй дансны төрөл журналд дүнгээ бүртгүүлдэггүй)
-    row = rows.find(r => !__norm(__txt(r)).includes(avoid)) || null;
+    // ж: дансны төрөл — «Туслахтай» (туслах бүртгэл), татварын (НӨАТ…) төрөл журналд нэмэлт үзүүлэлт шаарддаг
+    row = rows.find(r => { const t = __norm(__txt(r)); return pos.every(w => t.includes(w)) && !neg.some(w => t.includes(w)); }) || null;
     if (!row) return rows.length ? '' : null;
   } else if (want) {
     // Бичсэн урсгал: тодорхой мөрийг (текстээр) сонгоно — олдохгүй бол '' (сонгохгүй)

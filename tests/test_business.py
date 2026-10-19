@@ -246,5 +246,5 @@ def test_phase1_site_scenario_is_self_contained(tmp_path):
     # testaccounting 2026-10-19: «Туслахтай» төрлийн данс журналын дүнг бүртгүүлээгүй; «Мэдээлэл дутуу» үед
     # «Гүйлгээний загвар» сонгож мөрүүдийг дарж бичсэн — аль аль нь давтагдахгүй
     acc_notes = " ".join(by["Тест данс үүсгэх (дебет)"]["notes"])
-    assert "1201 Авлага" in acc_notes and "Туслахтай" not in acc_notes, acc_notes
+    assert "7001 Бусад зардал" in acc_notes and "Туслахтай" not in acc_notes, acc_notes      # НӨАТ ч биш
     assert "Гүйлгээний загвар" not in " ".join(fl["steps"][3]["notes"])
