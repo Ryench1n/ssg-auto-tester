@@ -35,11 +35,31 @@ READ_GRID_JS = r"""
   const wanted = (want || []).map(norm);
   let best = null, bestKey = null;
   for (const g of grids) {
-    const heads = Array.from(g.querySelectorAll('thead th, [role=columnheader]')).filter(__vis).map(clean);
-    if (!heads.length) continue;
+    // Навч толгой: хамгийн олон нүдтэй толгойн мөр — «Дүн» мэт бүлгийн (band) толгойн мөрийг холих юм бол индекс
+    // шилжиж «Кредит»-ийг «Дебет» гэж уншдаг байсан (testaccounting P1, 2026-10-19)
+    const hrows = Array.from(g.querySelectorAll('thead tr, tr.dxbl-grid-header-row, [role=row]'))
+      .filter(r => r.querySelector('th, [role=columnheader]'));
+    const leaf = hrows.map(r => Array.from(r.querySelectorAll('th, [role=columnheader]')).filter(__vis))
+      .sort((a, b) => b.length - a.length)[0] || [];
+    if (!leaf.length) continue;
+    const heads = leaf.map(clean);
+    const hbox = leaf.map(h => h.getBoundingClientRect());
+    // Нүдийг толгойтой ДЭЛГЭЦИЙН БАЙРЛАЛААР тааруулна (нүдний голын x нь толгойн хүрээнд) — нуугдмал/нэмэлт багана,
+    // сонголтын checkbox байсан ч зөв; байрлал тодорхойгүй бол дарааллаар
+    const align = (cells) => {
+      const out = heads.map(() => '');
+      let used = 0;
+      for (const c of cells) {
+        const b = c.getBoundingClientRect(), x = b.left + b.width / 2;
+        const k = hbox.findIndex(h => h.width > 0 && x >= h.left - 1 && x <= h.right + 1);
+        if (k >= 0 && !out[k]) { out[k] = clean(c); used++; }
+      }
+      if (!used) return cells.map(clean);
+      return out;
+    };
     const rows = Array.from(g.querySelectorAll('tbody tr, [role=row]')).filter(__vis)
       .filter(r => !r.querySelector('th, [role=columnheader]') && !r.closest('thead'))
-      .map(r => Array.from(r.querySelectorAll('td, [role=gridcell]')).map(clean))
+      .map(r => align(Array.from(r.querySelectorAll('td, [role=gridcell]')).filter(c => !c.closest('table') || c.closest('tr') === r)))
       .filter(cells => cells.some(c => c));
     const hit = wanted.filter(w => heads.some(h => norm(h) === w || norm(h).includes(w))).length;
     const key = [hit, rows.length];

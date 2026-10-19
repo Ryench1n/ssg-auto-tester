@@ -475,7 +475,9 @@ function journalView() {
   inp.onkeydown = (e) => { if (e.key === 'Enter') { jq = inp.value; render(); } };
   v.appendChild(bar);
   // SmartApp «Гүйлгээний жагсаалт»: бичилт (мөр) бүр — Данс, Дебет, Кредит; хайлт дансны кодоор ч шүүнэ
-  const t = $(`<table class="dxbl-grid"><thead><tr><th></th><th>№</th><th>Утга</th><th>Данс</th><th>Дебет - ₮</th><th>Кредит - ₮</th></tr></thead><tbody></tbody></table>`);
+  // Бүлгийн (band) толгой «Дүн» — DevExpress grid-ийн олон мөртэй толгой
+  const t = $(`<table class="dxbl-grid"><thead><tr><th colspan="4"></th><th colspan="2">Дүн</th></tr>
+    <tr><th></th><th>№</th><th>Утга</th><th>Данс</th><th>Дебет - ₮</th><th>Кредит - ₮</th></tr></thead><tbody></tbody></table>`);
   // Бодит SmartApp «Гүйлгээний жагсаалт»: баримтын мөр (дебет/кредит) бүрийг ТУСАД НЬ харуулна
   const q = jq.toLowerCase();
   for (const j of journals) {
