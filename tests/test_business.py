@@ -214,3 +214,32 @@ def test_phase1_journal_to_account_balance(tmp_path):
     assert fl["data"]["b2"] == fl["data"]["b0"]
     notes = " ".join(fl["steps"][1]["notes"])
     assert "1001" in notes and "1101" in notes                    # мөрүүд заасан дансаар
+
+
+@e2e
+def test_phase1_site_scenario_is_self_contained(tmp_path):
+    """testaccounting-ийн «P1» сценарийг (config-оос, зөвхөн цэсний түлхүүрийг mock-ийнхоор сольж) ажиллуулна:
+    тест өөрийн 2 дансыг үүсгэж → гүйлгээ → Δ +1/−1 → устгахад Δ = 0 → дансуудыг устгана. Тохиргоо (vars) шаардахгүй."""
+    import json as _json
+    from app.flows.engine import load_flow
+    site = load_config("https://testaccounting.smartapp.mn/")
+    spec = load_flow(site, "P1: Гүйлгээ → Дансны үлдэгдэл")
+    text = _json.dumps(spec, ensure_ascii=False)
+    text = text.replace("Мастер дата|Ерөнхий дэвтэр|Данс|accountlist", "Мастер дата|Бүртгэл|Дансны бүртгэл|/md/accm")
+    text = text.replace("Ерөнхий дэвтэр|Жагсаалт|Гүйлгээний жагсаалт|generalledger/journallist", JOURNAL_KEY)
+    spec = _json.loads(text)
+    with CrudServer() as srv:
+        srv.state.e2e = True
+        cfg = load_config(srv.url, {**FAST, "flows": {"P1": spec}})
+        pipe = PipelineRunner("p1s", srv.url, cfg, RunOptions(project="T"), tmp_path,
+                              steps=[{"kind": "crud", "flow": "P1"}], headless=True,
+                              on_waiting_login=HumanLogin("admin", PASSWORD))
+        data = asyncio.run(pipe.run())
+    fl = data.flows[0]
+    assert fl["status"] == M.PASS, [(s["index"], s["name"], s["status"], s["message"][:160]) for s in fl["steps"]]
+    assert fl["data"]["b0"] == {"debit": 0.0, "credit": 0.0}         # шинэ данс — 0-ээс
+    assert fl["data"]["b1"] == {"debit": 1.0, "credit": -1.0}
+    assert fl["data"]["b2"] == fl["data"]["b0"]
+    by = {s["name"]: s for s in fl["steps"]}
+    assert "Устгав" in " ".join(by["Цэвэрлэх: тест данс (дебет)"]["notes"])     # данснууд устгагдсан
+    assert "Устгав" in " ".join(by["Цэвэрлэх: тест данс (кредит)"]["notes"])

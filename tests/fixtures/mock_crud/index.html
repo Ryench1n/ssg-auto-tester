@@ -631,7 +631,7 @@ function journalForm(rec, host) {
         }
         const lk = tr.querySelector('.dxbl-text-edit-btn');
         // lookup-оос сонгосны дараа мөр засварын горимдоо үлдэж, кодын editor идэвхтэй хэвээр
-        if (lk) lk.onclick = (e) => { e.stopPropagation(); smartLookup('Данс', ACCOUNTS, false, (a) => {
+        if (lk) lk.onclick = (e) => { e.stopPropagation(); smartLookup('Данс', allAccounts(), false, (a) => {
           l.code = a.code; l.name = a.name; editCol = 1; draw();
           const ni = tb.querySelector('tr.dxbl-grid-edit-row input'); if (ni) ni.focus(); }); };
       }
@@ -1056,6 +1056,15 @@ function tbView() {
   v.appendChild(t);
   return v;
 }
+// «Дансны бүртгэл» (SmartApp «Данс»): Код, Нэр бүртгэнэ; үлдэгдэл = журналын (Дебет − Кредит); шинэ данс журналын
+// «Дансны код» lookup-д гарна. Гүйлгээнд ашиглагдсан дансыг устгах боломжгүй.
+const accBal = (code) => (ACC_BASE[code] || 0) + journals.reduce((a, j) =>
+  a + (j.lines || []).filter(l => l.code === code).reduce((b, l) => b + (+l.debit || 0) - (+l.credit || 0), 0), 0);
+MINI_DEFS.accm = {cols: ['Код', 'Нэр', 'Үлдэгдэл'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'}],
+  validate: (v) => !v.code ? 'Код оруулна уу' : !v.name ? 'Нэр оруулна уу' : '',
+  computed: (r) => [fmt(accBal(r.code))],
+  inUse: (r) => journals.some(j => (j.lines || []).some(l => l.code === r.code))};
+const allAccounts = () => ACCOUNTS.concat(((MINI.accm || {}).rows || []).map(r => ({code: r.code, name: r.name})));
 MINI.countries = {rows: [{id: 999, name: 'Бүх улс'}, {id: 496, name: 'Монгол'}], seq: 0, q: '', sel: null};
 const miniState = (kind) => MINI[kind] || (MINI[kind] = {rows: [], seq: 0, q: '', sel: null});
 
@@ -1070,6 +1079,7 @@ function miniView(kind) {
   bar.querySelector('.del').onclick = () => {
     const r = st.rows.find(x => x.id === st.sel); if (!r) return;
     if (d.locked && d.locked(r)) { warnModal('Батлагдсан баримтыг устгах боломжгүй'); return; }
+    if (d.inUse && d.inUse(r)) { warnModal('Мэдээллийг ашигласан байна'); return; }
     const m = $(`<div class="dxbl-modal" role="dialog"><div>Устгахдаа итгэлтэй байна уу?</div>
       <button class="dxbl-btn yes">Тийм</button> <button class="dxbl-btn no">Үгүй</button></div>`);
     m.querySelector('.no').onclick = () => m.remove();
@@ -1102,7 +1112,7 @@ function miniView(kind) {
   }
   const t = $(`<table class="dxbl-grid"><thead><tr>${d.cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody></tbody></table>`);
   const vals = (r) => d.extraCols ? [r.number || '', ...d.fields.map(f => r[f.name] || ''), r.status || 'Ноорог']
-                                  : d.fields.map(f => r[f.name] || '');
+                                  : d.fields.map(f => r[f.name] || '').concat(d.computed ? d.computed(r) : []);
   for (const r of st.rows.filter(r => !r.hidden && !r.fresh && !d.ghost).filter(r => !st.q || vals(r).join(' ').toLowerCase().includes(st.q.toLowerCase()))) {
     const tr = $(`<table><tr role="row" class="${r.id === st.sel ? 'dxbl-grid-selected-row dxbl-grid-focused-row' : ''}">
       ${vals(r).map(x => `<td>${esc(x) || '&nbsp;'}</td>`).join('')}</tr></table>`).querySelector('tr');

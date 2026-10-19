@@ -115,6 +115,7 @@ def make_handler(state: CrudState):
                 extra += "{name: 'Борлуулалт', href: '/md/sale', kind: 'sale'},"
                 extra += "{name: 'Гүйлгээ баланс', href: '/rv/trialbalance', kind: 'tb'},"
                 extra += "{name: 'Дансны жагсаалт', href: '/md/acclist', kind: 'acclist'},"
+                extra += "{name: 'Дансны бүртгэл', href: '/md/accm', kind: 'accm'},"
             html = html.replace(b"/*EXTRA_ITEMS*/", extra.encode())
             return self._send(200, html, "text/html; charset=utf-8")
 
