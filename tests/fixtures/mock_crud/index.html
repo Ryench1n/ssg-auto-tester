@@ -1118,7 +1118,7 @@ const miniState = (kind) => MINI[kind] || (MINI[kind] = {rows: [], seq: 0, q: ''
  * cashdoc «Кассын баримтын жагсаалт»: «Шинэ» → төрөл сонгох цэс (орлого / зарлага). Орлого: Дт 1001 / Кт 1201 (харилцагч).
  * custbal «Харилцагчийн үлдэгдлийн жагсаалт /дансаар/»: зөвхөн 1201 дансны (Дт − Кт) харилцагчаар; «Шүүх»-ээр шинэчилнэ. */
 MINI.custgroups = {rows: [{id: 1, name: 'Ажилчид'}], seq: 0, q: '', sel: null};
-MINI.itemtypes = {rows: [{id: 1, name: 'Бараа'}, {id: 2, name: 'Үйлчилгээ'}], seq: 0, q: '', sel: null};
+MINI.itemtypes = {rows: [{id: 1, name: 'Бараа'}, {id: 2, name: 'Ажил үйлчилгээ'}], seq: 0, q: '', sel: null};
 const usedIn = (pred) => ((MINI.sdoc || {}).rows || []).some(pred) || ((MINI.cashdoc || {}).rows || []).some(pred);
 MINI_DEFS.custm = {cols: ['Код', 'Нэр', 'Авлагын үлдэгдэл'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'},
     {label: 'Харилцагчийн бүлэг *', name: 'grp', kind: 'lookup', src: 'custgroups'},

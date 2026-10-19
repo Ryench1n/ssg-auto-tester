@@ -283,7 +283,7 @@ async def auto_create(env, args: dict) -> dict:
         values, picks, unresolved, skipped = apply_explicit(fields, values, picks, unresolved, key,
                                                             args.get("values") or {}, args.get("prefer") or {})
         if skipped:
-            env.note("Формд алга (алгасав): " + ", ".join(skipped))
+            env.note("Эхний табад алга (бусад табаас хайна): " + ", ".join(skipped))
         meta_fields = {l: str(v).replace(tag, "{run_tag}") for l, v in values.items()}
         prefer_by = {(_field_for(fields, str(k)) or {}).get("label", k): v for k, v in (args.get("prefer") or {}).items()}
         env.run.meta.update(fields={**meta_fields, **{l: "TODO" for l in picks + unresolved}}, key=key)
@@ -323,6 +323,11 @@ async def auto_create(env, args: dict) -> dict:
             if not val and tag in mine:
                 raise StepBlocked(f"'{label}' сонголтод тестийн «{mine}» бичлэг олдсонгүй — бодит бичлэгээр "
                                   "орлуулаагүй (өмнөх алхам үүсгэсэн эсэхийг шалгана уу)", skip_flow=True, category="tool")
+            if not val and current:
+                # Анхдагчийг солих гэсэн ч хүссэн сонголт алга — анхдагч хэвээр (сонголтуудыг тэмдэглэлээс харна)
+                picked[label] = current
+                env.note(f"'{label}': «{mine}» сонгогдсонгүй — анхдагч «{current[:40]}» хэвээр")
+                continue
             if not val and info.get("readonly"):
                 continue        # идэвхгүй (disabled) сонголт — хадгалах үеийн анхааруулга шийднэ
             if not val:
@@ -335,6 +340,9 @@ async def auto_create(env, args: dict) -> dict:
                                   skip_flow=True, category="nodata")
             picked[label] = val
             env.run.meta["fields"][label] = f"TODO сонголт (автомат: {val[:60]})"
+        if skipped:
+            # Эхний табад харагдаагүй заасан талбарууд — формын өөр таб дээр (ж: борлуулалтын «Бусад» → «НӨАТ-ын данс»)
+            await _fill_other_tabs(env, form_level, skipped, args, values, picked)
         env.note("Бөглөсөн: " + ", ".join(f"{l}={v}" for l, v in values.items())
                  + (" | Сонгосон: " + ", ".join(f"{l}={v}" for l, v in picked.items()) if picked else ""))
         if args.get("try_as"):
@@ -475,6 +483,40 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
             raise last
     await _survey_before_giving_up(env, filled_targets)
     raise last
+
+
+async def _fill_other_tabs(env, form_level: int, labels: list[str], args: dict, values: dict, picked: dict) -> None:
+    """Сценарийн заасан (prefer / values) боловч эхний табад алга талбаруудыг бусад табаас хайж бөглөнө.
+    Олдохгүй бол тэмдэглээд үргэлжилнэ (формд огт байхгүй байж болно). Дараа нь эхний табыг сэргээнэ."""
+    prefer, explicit = args.get("prefer") or {}, args.get("values") or {}
+    moved = False
+    for label in labels:
+        try:
+            info = await ui.reveal_field(env, label)
+        except StepFailed:
+            env.note(f"'{label}' аль ч табад алга — алгасав")
+            continue
+        moved = True
+        if label in prefer and (info["tag"] == "select" or info.get("combo") or info.get("lookup")):
+            cur = (info.get("value") or "").strip()
+            if cur and want_matches(str(prefer[label]), cur):
+                picked[label] = cur
+                continue
+            val = await ui.pick_option(env, label, want=str(prefer[label]))
+            if await ui.dialog_count(env) > form_level:
+                await ui.close_form(env, keep=form_level)
+            if val:
+                picked[label] = val
+            else:
+                env.note(f"'{label}': «{prefer[label]}» сонгож чадсангүй")
+        elif label in explicit:
+            v = str(explicit[label])
+            value = (v.lower() == "true") if v.lower() in ("true", "false") else v
+            await ui.fill_field(env, label, value)
+            values[label] = value
+    if moved:
+        await ui.form_tabs(env, 0)
+        await asyncio.sleep(0.3)
 
 
 async def _survey_before_giving_up(env, filled_targets: list[str]) -> None:

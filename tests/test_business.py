@@ -307,7 +307,7 @@ def test_phase2_order_to_cash_site_scenario_is_self_contained(tmp_path):
     sale = " ".join(by["Борлуулалт: тест харилцагчид зээлээр, 1 × 1000₮"]["notes"])
     assert "Бодит харилцагч" not in sale and "1201 Дансны авлага" in sale, sale       # зээлээр, тест харилцагч
     assert "Тоо хэмжээ=1" in sale and "Нэгж үнэ=1000" in sale and "Сав баглааны" not in sale, sale
-    assert "Үйлчилгээ" in " ".join(by["Тест үйлчилгээ (бараа) үүсгэх — 1000₮"]["notes"])
+    assert "Ажил үйлчилгээ" in " ".join(by["Тест үйлчилгээ (бараа) үүсгэх — 1000₮"]["notes"])    # анхдагч «Бараа»-г сольсон
     for name in ("Цэвэрлэх: тест үйлчилгээ", "Цэвэрлэх: тест харилцагч"):
         assert "Устгав" in " ".join(by[name]["notes"]), (name, by[name]["notes"])
 

@@ -139,8 +139,8 @@ async def pick_option(env: "FlowEngine", label: str, want: str = "") -> str:
     elif info["combo"]:
         js = r"""([s, want, strict]) => { const v = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
           const all = Array.from(document.querySelectorAll(s)).filter(v).filter(x => (x.innerText || '').trim());
-          const o = (want && all.find(x => x.innerText.includes(want))) || (strict ? null : all[0]);
-          if (want && all.length && !all.find(x => x.innerText.includes(want)))
+          const o = (want && all.find(x => x.innerText.toLowerCase().includes(want.toLowerCase()))) || (strict ? null : all[0]);
+          if (want && all.length && !all.find(x => x.innerText.toLowerCase().includes(want.toLowerCase())))
             window.__ssgComboMiss = all.map(x => x.innerText.trim()).slice(0, 15);
           if (!o) return ''; const t = o.innerText.trim(); o.click(); return t; }"""
         # 1) input дээр дарах  2) нээгдэхгүй бол dropdown (▾) товч — readonly ComboBox-д input дарахад нээгддэггүй
