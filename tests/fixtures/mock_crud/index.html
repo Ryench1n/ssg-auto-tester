@@ -1062,7 +1062,8 @@ const accBal = (code) => (ACC_BASE[code] || 0) + journals.reduce((a, j) =>
   a + (j.lines || []).filter(l => l.code === code).reduce((b, l) => b + (+l.debit || 0) - (+l.credit || 0), 0), 0);
 MINI_DEFS.accm = {cols: ['Код', 'Нэр', 'Үлдэгдэл'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'}],
   validate: (v) => !v.code ? 'Код оруулна уу' : !v.name ? 'Нэр оруулна уу' : '',
-  computed: (r) => [fmt(accBal(r.code))],
+  computed: (r) => [accBal(r.code) ? fmt(accBal(r.code)) : ''],      // SmartApp: тэг үлдэгдэл — хоосон нүд
+  tree: ['Бүх данс', 'Эргэлтийн хөрөнгө', 'Эргэлтийн бус хөрөнгө', 'Өр төлбөр', 'Эзэмшигчийн өмч', 'Борлуулалт', 'Өртөг'],
   inUse: (r) => journals.some(j => (j.lines || []).some(l => l.code === r.code))};
 const allAccounts = () => ACCOUNTS.concat(((MINI.accm || {}).rows || []).map(r => ({code: r.code, name: r.name})));
 MINI.countries = {rows: [{id: 999, name: 'Бүх улс'}, {id: 496, name: 'Монгол'}], seq: 0, q: '', sel: null};
@@ -1110,6 +1111,8 @@ function miniView(kind) {
     };
     bar.insertBefore(b, bar.querySelector('.dxbl-grid-search-box'));
   }
+  if (d.tree) v.appendChild($(`<dxbl-tree-list class="dxbl-grid" style="display:block"><table><thead><tr><th>Нэр</th></tr></thead>
+    <tbody>${d.tree.map(x => `<tr role="row"><td>${x}</td></tr>`).join('')}</tbody></table></dxbl-tree-list>`));
   const t = $(`<table class="dxbl-grid"><thead><tr>${d.cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody></tbody></table>`);
   const vals = (r) => d.extraCols ? [r.number || '', ...d.fields.map(f => r[f.name] || ''), r.status || 'Ноорог']
                                   : d.fields.map(f => r[f.name] || '').concat(d.computed ? d.computed(r) : []);

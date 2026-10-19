@@ -19,15 +19,21 @@ from app.flows.steps.auto import is_date_field
 from app.flows.steps.crud import _require_tag
 from app.flows.ui._js import _COMMON_JS
 
-# Харагдах (цонхны бус) grid-үүдээс толгойтой, хамгийн олон мөртэйг нь {headers, rows} болгон уншина
+# Харагдах (цонхны бус) grid-үүдээс {headers, rows} уншина: хүссэн баганууд (want) хамгийн их таарсан, дараа нь
+# хамгийн олон мөртэй. Групп мод (dxbl-tree-list) алгасна — SmartApp «Данс» жагсаалтын зүүн «Групп» мод олон мөртэй
+# тул хайлтаар шүүсэн (1 мөртэй) үндсэн grid-ийн оронд сонгогдож байсан (testaccounting 2026-10-19).
 READ_GRID_JS = r"""
-([sel]) => {
+([sel, want]) => {
   /*__COMMON__*/
   const dialogs = __findDialogs(sel);
   const grids = Array.from(document.querySelectorAll(sel.grid || '.dxbl-grid, [role=grid], table')).filter(__vis)
-    .filter(g => !dialogs.some(d => d.contains(g)));
-  const clean = (e) => __txt(e).replace(/\s+/g, ' ').trim();
-  let best = null;
+    .filter(g => !dialogs.some(d => d.contains(g)))
+    .filter(g => g.tagName !== 'DXBL-TREE-LIST' && !g.closest('dxbl-tree-list'))
+    .filter((g, k, a) => !a.some(o => o !== g && g.contains(o)));        // дотоод table — гадна grid-ээр нь
+  const clean = (e) => __txt(e).replace(/No filter applied|Filter applied/gi, '').replace(/\s+/g, ' ').trim();
+  const norm = (s) => s.toLowerCase();
+  const wanted = (want || []).map(norm);
+  let best = null, bestKey = null;
   for (const g of grids) {
     const heads = Array.from(g.querySelectorAll('thead th, [role=columnheader]')).filter(__vis).map(clean);
     if (!heads.length) continue;
@@ -35,7 +41,11 @@ READ_GRID_JS = r"""
       .filter(r => !r.querySelector('th, [role=columnheader]') && !r.closest('thead'))
       .map(r => Array.from(r.querySelectorAll('td, [role=gridcell]')).map(clean))
       .filter(cells => cells.some(c => c));
-    if (!best || rows.length > best.rows.length) best = {headers: heads, rows};
+    const hit = wanted.filter(w => heads.some(h => norm(h) === w || norm(h).includes(w))).length;
+    const key = [hit, rows.length];
+    if (!best || key[0] > bestKey[0] || (key[0] === bestKey[0] && key[1] > bestKey[1])) {
+      best = {headers: heads, rows}; bestKey = key;
+    }
   }
   return best;
 }
@@ -84,6 +94,8 @@ def pick_value(headers: list[str], rows: list[list[str]], match: str, column: st
     # DevExpress grid-ийн сонголтын (checkbox) багана толгойгүй байж болно — нүд олон бол баруун талаас тааруулна
     shift = max(0, len(row) - len(headers))
     cell = row[idx + shift] if idx + shift < len(row) else ""
+    if not str(cell).strip():
+        return 0.0, ""          # SmartApp тэг үлдэгдлийг хоосон нүдээр харуулдаг (шинэ данс)
     v = parse_amount(cell)
     return v, ("" if v is not None else f"«{match}» × «{column}» нүд тоо биш: «{cell}»")
 
@@ -152,7 +164,7 @@ async def report_read(env, args: dict) -> dict:
         headers, rows = [], []
         for spec in (args.get("rows") or {}).values():
             await ui.grid_find_settled(env, str(spec["match"]))
-            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env)])
+            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), [str(x["column"]) for x in (args.get("rows") or {}).values()]])
             if grid and grid["rows"]:
                 headers = grid["headers"]
                 rows += grid["rows"]
@@ -161,7 +173,7 @@ async def report_read(env, args: dict) -> dict:
     else:
         grid = None
         for _ in range(int(args.get("wait_s", 10) * 2)):
-            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env)])
+            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), [str(x["column"]) for x in (args.get("rows") or {}).values()]])
             if grid and grid["rows"]:
                 break
             await asyncio.sleep(0.5)
@@ -223,7 +235,7 @@ async def doc_number(env, args: dict) -> dict:
     await ui.ensure_menu(env, args.get("menu"))
     if not await ui.grid_find_settled(env, find):
         raise StepFailed(f"'{find}' хайлтаар мөр олдсонгүй")
-    grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env)])
+    grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), [str(args.get("column", "Дугаар"))]])
     col = _norm(args.get("column", "Дугаар"))
     hs = [_norm(h) for h in (grid or {}).get("headers") or []]
     idx = hs.index(col) if col in hs else next((i for i, h in enumerate(hs) if col in h), -1)
@@ -287,7 +299,7 @@ async def doc_action(env, args: dict) -> dict:
         got = ""
         for _ in range(4):
             await ui.grid_find_settled(env, find)
-            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env)])
+            grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), [str(exp.get("column", "Төлөв"))]])
             hs = [_norm(h) for h in (grid or {}).get("headers") or []]
             c = _norm(exp.get("column", "Төлөв"))
             idx = hs.index(c) if c in hs else -1
