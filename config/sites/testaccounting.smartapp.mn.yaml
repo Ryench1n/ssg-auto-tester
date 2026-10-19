@@ -56,10 +56,12 @@ flows:
     steps:
       - uses: crud.auto_create
         name: "Тест данс үүсгэх (дебет)"
-        with: {menu: "Мастер дата|Ерөнхий дэвтэр|Данс|accountlist", save_as: d01_rec, field_as: d01_field, try_as: d01_try}
+        with: {menu: "Мастер дата|Ерөнхий дэвтэр|Данс|accountlist", save_as: d01_rec, field_as: d01_field, try_as: d01_try,
+               prefer: {"Дансны төрөл": "!Туслахтай"}}   # туслах бүртгэлтэй төрөл журналын дүнг бүртгүүлдэггүй
       - uses: crud.auto_create
         name: "Тест данс үүсгэх (кредит)"
-        with: {menu: "Мастер дата|Ерөнхий дэвтэр|Данс|accountlist", save_as: c02_rec, field_as: c02_field, try_as: c02_try}
+        with: {menu: "Мастер дата|Ерөнхий дэвтэр|Данс|accountlist", save_as: c02_rec, field_as: c02_field, try_as: c02_try,
+               prefer: {"Дансны төрөл": "!Туслахтай"}}   # туслах бүртгэлтэй төрөл журналын дүнг бүртгүүлдэггүй
       - &acc
         uses: report.read
         name: "Дансны үлдэгдэл — эхний төлөв"

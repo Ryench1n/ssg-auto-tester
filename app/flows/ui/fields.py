@@ -128,7 +128,7 @@ async def pick_option(env: "FlowEngine", label: str, want: str = "") -> str:
         picked = await loc.evaluate("e => e.options[e.selectedIndex] ? e.options[e.selectedIndex].text : ''")
     elif info.get("lookup"):
         picked = await pick_from_lookup(env, f"'{label}' талбарын сонголтын", want=want) if want else ""
-        if not picked:
+        if not picked and not want.startswith("!"):        # «!…» (хасах) нөхцөлгүйгээр сонгохгүй
             picked = await pick_from_lookup(env, f"'{label}' талбарын сонголтын")
         if not picked:
             return ""

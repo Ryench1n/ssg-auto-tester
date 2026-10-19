@@ -342,6 +342,7 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
                 raise
             last = e
         message = "\n".join(f.text for f in last.findings)
+        env.note("Хадгалахад анхааруулга: " + " | ".join(x.strip() for x in message.splitlines() if x.strip())[:200])
         await ui.close_form(env, keep=form_level)      # анхааруулгын цонхыг хаана (формыг биш)
         await ui.clear_toasts(env)
         acted = False
@@ -398,6 +399,10 @@ async def _fill_optional(env, form_level: int, words: dict, values: dict, picked
     for f in fields:
         label = f["label"]
         if f["required"] or label in values or label in picked or (f.get("value") or "").strip():
+            continue
+        if _match(label, ["загвар", "template"]):
+            # Загвар сонгоход форм бүхэлдээ (утга, мөрүүд) загвараар солигддог — testaccounting журнал: «Цалингийн
+            # гүйлгээ» загвар 2 мөрийг 13 мөрөөр сольж, «Гүйлгээний утга»-ыг дарж бичсэн (2026-10-19)
             continue
         if f["readonly"] and not f.get("combo"):
             continue

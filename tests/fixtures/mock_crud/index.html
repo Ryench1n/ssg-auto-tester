@@ -576,7 +576,9 @@ function journalForm(rec, host) {
   const m = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Гүйлгээ
       <button class="dxbl-popup-header-button">×</button></div>
     <div class="dxbl-toolbar"><button class="dxbl-btn save">Хадгалах & Гарах</button></div>
-    <div class="dxbl-fl">${field('Гүйлгээний утга *', 'desc', rec ? rec.desc : '')}${field('Дүн *', 'amount', rec ? rec.amount : '0')}</div>
+    <div class="dxbl-fl">${field('Гүйлгээний утга *', 'desc', rec ? rec.desc : '')}${field('Дүн *', 'amount', rec ? rec.amount : '0')}
+      <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Гүйлгээний загвар:</label><div class="dxbl-fl-ctrl">
+        <input name="tpl"><button class="dxbl-btn tlk">...</button></div></div></div>
     <!-- Бодит SmartApp «Гүйлгээ»: мөрийн grid «Данс» таб дээр, «Бусад» таб дээр нэмэлт талбар -->
     <div class="dxbl-tabs" role="tablist"><div role="tab" class="dxbl-tabs-item dxbl-active" data-t="acc">Данс</div>
       <div role="tab" class="dxbl-tabs-item" data-t="oth">Бусад</div></div>
@@ -645,8 +647,17 @@ function journalForm(rec, host) {
   m.querySelector('.sl-grid-command').onclick = () => {
     lines.push({code: '', name: '', debit: 0, credit: 0}); editIdx = lines.length - 1; editCol = 1; draw(); };
   m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
+  // Загвар сонгоход формын утга, мөрүүд загвараар солигдоно (бодит SmartApp «Цалингийн гүйлгээ»)
+  m.querySelector('.tlk').onclick = () => smartLookup('Гүйлгээний загвар', [{code: '100001', name: 'Цалингийн гүйлгээ'}], false, () => {
+    m.querySelector('[name=tpl]').value = '100001';
+    m.querySelector('[name=desc]').value = 'Цалингийн гүйлгээ';
+    lines.splice(0, lines.length, {code: '1001', name: 'Касс дахь мөнгө', debit: 0, credit: 0},
+                 {code: '1101', name: 'Банкин дахь мөнгө', debit: 0, credit: 0});
+    editIdx = null; draw(); });
   m.querySelector('.save').onclick = () => {
     const desc = m.querySelector('[name=desc]').value.trim(), amount = +m.querySelector('[name=amount]').value || 0;
+    const auxCodes = ((MINI.accm || {}).rows || []).filter(r => /Туслахтай/.test(r.type || '')).map(r => r.code);
+    if (lines.some(l => auxCodes.includes(l.code))) return warnModal('Нийт дүн 0 эсвэл дебет болон кредит дүн зөрүүтэй байна !');
     if (!desc) { toast('Гүйлгээний утга оруулна уу'); return; }
     if (lines.some(l => !l.code)) {    // бодит: данс сонгоогүй (хоосон) мөр байвал хадгалахгүй
       const w = $(`<div class="dxbl-modal err" role="dialog"><div>Хадгалах боломжгүй байна</div><div>Данс сонгогдоогүй байна.</div>
@@ -1060,8 +1071,12 @@ function tbView() {
 // «Дансны код» lookup-д гарна. Гүйлгээнд ашиглагдсан дансыг устгах боломжгүй.
 const accBal = (code) => (ACC_BASE[code] || 0) + journals.reduce((a, j) =>
   a + (j.lines || []).filter(l => l.code === code).reduce((b, l) => b + (+l.debit || 0) - (+l.credit || 0), 0), 0);
-MINI_DEFS.accm = {cols: ['Код', 'Нэр', 'Үлдэгдэл'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'}],
-  validate: (v) => !v.code ? 'Код оруулна уу' : !v.name ? 'Нэр оруулна уу' : '',
+// «Дансны төрөл»: бодит SmartApp шиг эхний мөр «Туслахтай» (туслах бүртгэлтэй) — ийм дансаар журнал хадгалахад
+// мөрийн дүн бүртгэгдэхгүй: «Нийт дүн 0 эсвэл дебет болон кредит дүн зөрүүтэй байна !» (testaccounting 2026-10-19)
+MINI.acctypes = {rows: [{id: 1001, name: 'Касс дахь мөнгө Туслахтай'}, {id: 1201, name: 'Авлага'}], seq: 0, q: '', sel: null};
+MINI_DEFS.accm = {cols: ['Код', 'Нэр', 'Үлдэгдэл'], fields: [{label: 'Код *', name: 'code'}, {label: 'Нэр *', name: 'name'},
+                                                            {label: 'Дансны төрөл *', name: 'type', kind: 'lookup', src: 'acctypes'}],
+  validate: (v) => !v.code ? 'Код оруулна уу' : !v.name ? 'Нэр оруулна уу' : !v.type ? 'Дансны төрөл сонгоно уу' : '',
   computed: (r) => [accBal(r.code) ? fmt(accBal(r.code)) : ''],      // SmartApp: тэг үлдэгдэл — хоосон нүд
   tree: ['Бүх данс', 'Эргэлтийн хөрөнгө', 'Эргэлтийн бус хөрөнгө', 'Өр төлбөр', 'Эзэмшигчийн өмч', 'Борлуулалт', 'Өртөг'],
   inUse: (r) => journals.some(j => (j.lines || []).some(l => l.code === r.code))};

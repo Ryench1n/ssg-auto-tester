@@ -242,7 +242,12 @@ MARK_LOOKUP_ROW_JS = r"""
     .filter(r => { const t = __txt(r).replace(/\s+/g, ' ').trim();
                    return t && !empty.test(t) && /[^\d\s.,\-]/.test(t); });
   let row = null;
-  if (want) {
+  const avoid = want && want.startsWith('!') ? __norm(want.slice(1)) : '';
+  if (avoid) {
+    // «!Туслахтай» — тэр текстгүй эхний мөр (туслах бүртгэлтэй дансны төрөл журналд дүнгээ бүртгүүлдэггүй)
+    row = rows.find(r => !__norm(__txt(r)).includes(avoid)) || null;
+    if (!row) return rows.length ? '' : null;
+  } else if (want) {
     // Бичсэн урсгал: тодорхой мөрийг (текстээр) сонгоно — олдохгүй бол '' (сонгохгүй)
     const w = __norm(want);
     const all = rows.concat(Array.from(cand).filter(__vis).filter(isTree));
