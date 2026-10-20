@@ -521,12 +521,13 @@ function journalView() {
   // Бодит SmartApp «Гүйлгээний жагсаалт»: баримтын мөр (дебет/кредит) бүрийг ТУСАД НЬ харуулна
   const q = jq.toLowerCase();
   for (const j of journals) {
-    for (const l of j.lines.filter(l => !q || j.desc.toLowerCase().includes(q) || String(l.code).toLowerCase().includes(q))) {
+    for (const l of j.lines.filter(l => !q || j.desc.toLowerCase().includes(q) || String(l.code).toLowerCase().includes(q)
+                                        || String(j.no || '').toLowerCase().includes(q))) {
       // SmartApp: мөр дарахад бичлэг засварын горимд НЭЭГДЭНЭ; сонгохдоо (текстгүй) checkbox
       const cls = [j.id === jsel ? 'dxbl-grid-selected-row' : '', j.id === jfocus ? 'dxbl-grid-focused-row' : ''].join(' ');
       const tr = $(`<table><tr role="row" data-visible-index="0" class="${cls}">
         <td><span class="dxbl-checkbox" style="display:inline-block;width:14px;height:14px;border:1px solid #888"></span></td>
-        <td>ЖУ${j.id}</td><td>${esc(j.desc)}</td><td>${esc(l.code)}</td><td>${l.debit}</td><td>${l.credit}</td></tr></table>`).querySelector('tr');
+        <td>${esc(j.no || 'ЖУ' + j.id)}</td><td>${esc(j.desc)}</td><td>${esc(l.code)}</td><td>${l.debit}</td><td>${l.credit}</td></tr></table>`).querySelector('tr');
       tr.querySelector('.dxbl-checkbox').onclick = (e) => { e.stopPropagation(); jsel = j.id; render(); };
       // Бодит (2026-09-30): мөр дарахад нээгдэх засварын форм (popup edit form) нь dxbl-grid элементийн ДОТОР
       tr.onclick = () => { jfocus = j.id; render(); journalForm(j, document.querySelector('.journal-grid')); };
@@ -1239,7 +1240,7 @@ function saleForm(rec) {
     const sum = total();
     const row = {id: ++st.seq, desc, cust, acc, total: sum, lines: ok};
     st.rows.push(row);
-    journals.push({id: ++jseq, desc, amount: sum, src: 'sale' + row.id,
+    journals.push({id: ++jseq, desc, amount: sum, src: 'sale' + row.id, no: 'БР' + String(row.id).padStart(7, '0'),
       lines: [{code: acc, name: '', debit: sum, credit: 0, cust}, {code: '5101', name: 'Борлуулалтын орлого', debit: 0, credit: sum, cust}]});
     m.remove(); render();
   };
@@ -1272,7 +1273,7 @@ function cashForm(kind) {
     const income = /орлог/.test(kind);
     const row = {id: ++st.seq, desc, cust, acc, amount: amt, kind};
     st.rows.push(row);
-    journals.push({id: ++jseq, desc, amount: amt, src: 'cash' + row.id,
+    journals.push({id: ++jseq, desc, amount: amt, src: 'cash' + row.id, no: 'КО' + String(row.id).padStart(7, '0'),
       // ТААМАГ (бодитоор батлагдаагүй): харьцсан тал — харилцагчийн авлага (1201). Бодит апп-д «Данс»=00099901 +
       // харилцагчтай ордер авлагыг хаагаагүй — survey/show_rows-ийн дүнгээр засна
       lines: [{code: acc, name: '', debit: income ? amt : 0, credit: income ? 0 : amt, cust},
@@ -1286,8 +1287,8 @@ function cashForm(kind) {
   };
   document.body.appendChild(m);
 }
-MINI_DEFS.cashdoc = {cols: ['Баримтын төрөл', 'Гүйлгээний утга', 'Дебет - ₮'], fields: [], validate: () => '',
-  rowVals: (r) => [r.kind, r.desc, fmt(r.amount)], onDelete: (r) => dropJournal('cash' + r.id),
+MINI_DEFS.cashdoc = {cols: ['№', 'Баримтын төрөл', 'Гүйлгээний утга', 'Дебет - ₮'], fields: [], validate: () => '',
+  rowVals: (r) => ['КО' + String(r.id).padStart(7, '0'), r.kind, r.desc, fmt(r.amount)], onDelete: (r) => dropJournal('cash' + r.id),
   // Бодит: «Шинэ» → баримтын төрөл сонгох dropdown (HR «Тогтмол үйл ажиллагаа» шиг DOM)
   addMenu: () => {
     const mnu = $(`<dxbl-dropdown-dialog class="dxbl-dropdown-dialog dxbl-toolbar-dropdown"

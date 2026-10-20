@@ -360,3 +360,26 @@ def test_blocked_step_in_e2e_flow_keeps_its_test_cases(tmp_path):
     ids = [t["id"] for t in summary["tcs"]]
     assert "TC-FLOW-EB-001" in ids and summary["decision"] != "GO" or summary["stats"]["blocked"] >= 1, (ids, summary["stats"])
     assert "TC-FLOW-EB-001" in ids
+
+
+@e2e
+def test_p2_diagnostic_flow_is_read_only_and_shows_rows(tmp_path):
+    """P2D (оношлогоо): зөвхөн уншина — ГД ба кассын жагсаалтын мөрүүдийг тайланд бичнэ, юу ч бүртгэхгүй."""
+    import json as _json
+    from app.flows.engine import load_flow
+    spec = load_flow(load_config("https://testaccounting.smartapp.mn/"), "P2D: Кассын баримтын ГД бичилт (оношлогоо)")
+    text = _json.dumps(spec, ensure_ascii=False)
+    for real, mock in P2_KEYS.items():
+        text = text.replace(real, mock)
+    spec = _json.loads(text)
+    with CrudServer() as srv:
+        srv.state.e2e = True
+        cfg = load_config(srv.url, {**FAST, "flows": {"P2D": spec}})
+        pipe = PipelineRunner("p2d", srv.url, cfg, RunOptions(project="T"), tmp_path,
+                              steps=[{"kind": "crud", "flow": "P2D"}], headless=True,
+                              on_waiting_login=HumanLogin("admin", PASSWORD))
+        data = asyncio.run(pipe.run())
+    fl = data.flows[0]
+    assert fl["status"] == M.PASS, [(s["name"], s["message"][:150]) for s in fl["steps"]]
+    assert all(not s.get("findings") for s in fl["steps"])
+    assert srv.state.untagged_touched == 0
