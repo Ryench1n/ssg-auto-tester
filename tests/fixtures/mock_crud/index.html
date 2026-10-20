@@ -1256,7 +1256,17 @@ function cashForm(kind) {
       <button class="dxbl-popup-header-button">×</button></div>
     <div class="dxbl-fl">${field('Гүйлгээний утга *', 'desc', '')}${lookupField('Харилцагч', 'cust', '')}
       ${lookupField('Данс *', 'acc', '')}${field('Дүн *', 'amount', '0')}</div>
-    <button class="dxbl-btn save">Хадгалах & Гарах</button></div>`);
+    <button class="dxbl-btn save">Хадгалах & Гарах</button> <button class="dxbl-btn jrn">Журнал (F6)</button></div>`);
+  // Бодит: «Журнал (F6)» — баримтын ГД-ийн мөрүүд (харьцсан данс) оруулах цонх
+  m.querySelector('.jrn').onclick = () => {
+    const j = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Журнал
+        <button class="dxbl-popup-header-button">×</button></div>
+      <dxbl-grid class="dxbl-grid" style="display:block"><table><thead><tr class="dxbl-grid-header-row">
+        <th class="dxbl-grid-command-cell"><button class="dxbl-btn sl-grid-command"><span class="fa-plus"></span></button></th>
+        <th>Данс</th><th>Дебет</th><th>Кредит</th></tr></thead><tbody></tbody></table></dxbl-grid></div>`);
+    j.querySelector('.dxbl-popup-header-button').onclick = () => j.remove();
+    document.body.appendChild(j);
+  };
   m.querySelector('.lk-cust').onclick = () => smartLookup('Харилцагч', saleCustomers(), false, (it) => {
     m.querySelector('[name=cust]').value = it.code + ' ' + it.name; });
   // testaccounting (2026-10-19): «Данс» lookup-д зөвхөн КАССЫН данснууд (эхнийх нь тест данс «00099901 Testcomplete»)

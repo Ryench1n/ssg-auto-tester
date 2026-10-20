@@ -383,6 +383,8 @@ async def _auto_create(env, args: dict) -> dict:
             # Калибровк: хадгалахын өмнө таб бүрийн хоосон талбарууд (ж: кассын орлогын харьцсан данс хаана байна)
             flow = re.sub(r"[^\w-]+", "_", getattr(env, "flow_name", ""), flags=re.U).strip("_")[:30]
             env.note("Хадгалахын өмнөх форм — " + " | ".join(await ui.survey_tabs(env, shot_prefix=f"pre-{flow}", with_values=True)))
+        for btn in args.get("inspect") or []:
+            await _inspect_button(env, form_level, str(btn))
         keep = {(_field_for(fields, str(k)) or {}).get("label", k) for k in [*(args.get("prefer") or {}), *(args.get("values") or {})]}
         await _save_with_lines(env, form_level, values, picked, line_spec=args.get("lines") or {}, keep=keep)
     except StepFailed as e:
@@ -518,6 +520,37 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
             raise last
     await _survey_before_giving_up(env, filled_targets)
     raise last
+
+
+async def _inspect_button(env, form_level: int, text: str) -> None:
+    """Калибровк: формын товчийг (ж: кассын ордерын «Журнал (F6)») дарж юу нээгдсэнийг (цонхны текст, талбарууд, мөрийн
+    grid-ийн багана) тайланд бичээд ХАДГАЛАХГҮЙ хаана. Үндсэн формд өөрчлөлт хийхгүй."""
+    flow = re.sub(r"[^\w-]+", "_", getattr(env, "flow_name", ""), flags=re.U).strip("_")[:30]
+    try:
+        await ui.click_button(env, [text], scope="dialog", wait_s=2)
+    except StepFailed:
+        try:
+            await ui.click_button(env, [text], scope="page", wait_s=2)
+        except StepFailed:
+            env.note(f"«{text}» товч олдсонгүй")
+            return
+    await asyncio.sleep(1.0)
+    await ui.settle(env, 5)
+    try:
+        await env.page.screenshot(path=str(env.run_dir / "shots" / f"inspect-{flow}.png"), timeout=5000)
+    except Exception:
+        pass
+    probe = await ui.probe(env)
+    opened = await ui.dialog_count(env) > form_level
+    top = (probe.get("dialogs") or [{}])[-1].get("text", "").replace("\n", " | ")[:500] if opened else ""
+    lines = await env.page.evaluate(ui.MARK_LINES_ADD_JS, [ui.sel_payload(env)])
+    fields = await ui.scan_form(env, wait_s=0) if opened else []
+    env.note(f"«{text}» дарахад: {'шинэ цонх' if opened else 'цонх нээгдээгүй'}"
+             + (f"; текст: {top}" if top else "")
+             + (f"; талбарууд: {', '.join(f['label'] + '=' + (f.get('value') or '')[:20] for f in fields[:15])}" if fields else "")
+             + (f"; мөрийн grid баганууд: {', '.join(h for h in lines['headers'] if h)} ({lines['rows']} мөр)" if lines else ""))
+    if opened:
+        await ui.close_form(env, keep=form_level)             # ХАДГАЛАХГҮЙ хаана
 
 
 async def _fill_other_tabs(env, form_level: int, labels: list[str], args: dict, values: dict, picked: dict) -> None:
