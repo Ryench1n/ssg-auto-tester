@@ -227,7 +227,11 @@ async def report_read(env, args: dict) -> dict:
         env.note(f"Тайлангийн файл: reports/{path.name} ({len(rows)} мөр)")
     elif args.get("search"):
         # Жагсаалт (ж: «Данс» — Код, Үлдэгдэл): мөр бүрийг хайлтаар шүүж уншина (олон хуудастай жагсаалт)
-        if args.get("refresh", True):
+        if args.get("widen_years"):
+            # Баримтын жагсаалт анхдагчаар зөвхөн энэ үеийг харуулдаг — өмнөх баримтуудыг (уншилт) харахын тулд
+            widened = await ui.widen_date_filter(env, int(args["widen_years"]))
+            env.note(f"Огнооны шүүлтийг {widened}-аас сунгав" if widened else "Огнооны шүүлт олдсонгүй (сунгаагүй)")
+        elif args.get("refresh", True):
             await ui.reload_list(env)       # өмнө нээсэн таб — шинэ бичилт харагдахгүй байж болно
         # Нэг match-ыг НЭГ удаа хайна; alias бүр зөвхөн өөрийн хайлтын мөрөөс тооцно — ижил match-тай хоёр alias
         # (ж: sale_dt, sale_net) мөрийг давхар нэмж Σ-г 2 дахин өсгөж байсан (P2 mock, 2026-10-19)

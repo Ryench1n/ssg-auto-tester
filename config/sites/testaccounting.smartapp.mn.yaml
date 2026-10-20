@@ -308,6 +308,7 @@ flows:
           menu: "Ерөнхий дэвтэр|Жагсаалт|Гүйлгээний жагсаалт|generalledger/journallist"
           search: true
           show_rows: true
+          widen_years: 3                # жагсаалт анхдагчаар зөвхөн энэ үеийг харуулдаг (2026-10-20: 0 мөр)
           rows:
             by_type: {match: "Кассын орлогын ордер", column: "Дебет", agg: sum}
             by_no: {match: "КО1", column: "Дебет", agg: sum}
@@ -318,6 +319,7 @@ flows:
           menu: "Мөнгөн хөрөнгө|Жагсаалт|Кассын баримтын жагсаалт|cashflow/cashdocumentlist"
           search: true
           show_rows: true
+          widen_years: 3                # жагсаалт анхдагчаар зөвхөн энэ үеийг харуулдаг (2026-10-20: 0 мөр)
           rows:
             by_type: {match: "Кассын орлогын ордер", column: "Дебет", agg: sum}
           save_as: d2
