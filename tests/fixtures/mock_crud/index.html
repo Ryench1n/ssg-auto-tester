@@ -1280,6 +1280,8 @@ function cashForm(kind) {
           <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.code)}"><button class="dxbl-btn dxbl-text-edit-btn">...</button>` : esc(l.code)}</td>
           <td>${esc(l.name)}</td><td>${num('debit')}</td><td>${num('credit')}</td><td>${esc(l.cust || '')}</td></tr></table>`).querySelector('tr');
         tr.querySelectorAll('input[data-k]').forEach(x => x.onchange = () => { l[x.dataset.k] = +x.value || 0; });
+        // Бодит: «Шинэ»-ээр нэмсэн мөр засварын горимд ОРООГҮЙ — нүд дээр дарахад засварын горимд орно
+        if (!ed) tr.querySelectorAll('td').forEach(td => td.onclick = () => { edit = i; draw(); });
         const lk = tr.querySelector('.dxbl-text-edit-btn');
         if (lk) lk.onclick = (e) => { e.stopPropagation(); smartLookup('Данс', [{code: '100101', name: 'Касс дахь мөнгө /төгрөг/'},
           {code: '1201', name: 'Дансны авлага'}, {code: '120101', name: 'Дансны авлага'}, {code: '340103', name: 'Авсан зээл'}],
@@ -1287,10 +1289,11 @@ function cashForm(kind) {
         tb.appendChild(tr);
       });
     };
-    j.querySelector('.jnew').onclick = () => { work.push({code: '', name: '', debit: 0, credit: 0, cust: ''}); edit = work.length - 1; draw(); };
+    j.querySelector('.jnew').onclick = () => { work.push({code: '', name: '', debit: 0, credit: 0, cust: ''}); edit = null; draw(); };
     j.querySelector('.jsave').onclick = () => {
       const ok = work.filter(l => l.code && (l.debit > 0 || l.credit > 0));
       const d = ok.reduce((a, l) => a + l.debit, 0), c = ok.reduce((a, l) => a + l.credit, 0);
+      if (work.some(l => !l.code)) return warnModal('Данс сонгогдоогүй байна.');
       if (d !== c) return warnModal('Дебет кредит тэнцэхгүй байна !');
       jlines = ok; j.remove();
     };

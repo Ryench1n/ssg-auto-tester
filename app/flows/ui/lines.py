@@ -116,6 +116,7 @@ def _hnorm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").replace("*", "")).strip().lower()
 
 
+ACCOUNT_WORDS = ["дансны код", "данс", "барааны код", "код", "account"]
 DEBIT_WORDS = ["дебет", "debit"]
 CREDIT_WORDS = ["кредит", "credit"]
 QTY_WORDS = ["тоолсон", "тоо ширхэг", "тоо", "хэмжээ", "дүн", "үнэ", "qty", "quantity", "amount"]
@@ -172,6 +173,22 @@ async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] |
         name = lambda i: (info["headers"][i] if i < len(info["headers"]) else f"#{i}") or f"#{i}"
         part = []
         lk = next((c for c in cells if c["lookup"] and not c["command"]), None)
+        if lk is None and want:
+            # Мөр нэмэхэд нүднүүд засварын горимд ороогүй (testaccounting кассын «Журнал (F6)» — toolbar «Шинэ»,
+            # 2026-10-20: данс сонгогдоогүй) — дансны нүдийг идэвхжүүлээд «...»-ийг дахин хайна
+            k = col(ACCOUNT_WORDS)
+            if k is not None and await _activate_cell(env, k):
+                cells = await _edit_row(env) or cells
+                lk = next((c for c in cells if c["i"] == k and c["lookup"]), None) or \
+                    ({"i": k, "lookup": True, "command": False}
+                     if await env.page.evaluate(MARK_CELL_LOOKUP_JS, k) else None)
+            if lk is None:
+                await _dump_line_row(env, "no-lookup")
+                if k is None or not await _fill_cell(env, k, want):
+                    return {"lines": lines, "error": f"дансны нүдэнд сонголт («...») олдсонгүй, «{want}» бичиж чадсангүй"}
+                part.append(f"{name(k)}={want} (бичсэн)")
+                env._line_hint = want
+                cells = await _edit_row(env) or cells
         if lk is not None:
             await _activate_cell(env, lk["i"])
             if not await env.page.evaluate(MARK_CELL_LOOKUP_JS, lk["i"]):

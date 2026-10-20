@@ -560,9 +560,10 @@ async def _fill_journal(env, form_level: int, spec: dict) -> None:
     if errors:
         raise StepFailed(f"Журнал хадгалахад: {errors[0].text}", errors)
     if warnings:
-        msg = " | ".join(w.text.replace("\n", " ")[:150] for w in warnings)
+        # popup_problems: анхааруулга нь текст (str) — Finding биш
+        msg = " | ".join(str(w).replace("\n", " ")[:150] for w in warnings)
         await ui.close_form(env, keep=form_level)
-        raise StepBlocked(f"Журнал хадгалахад анхааруулга: {msg}", warnings, skip_flow=True, category="validation")
+        raise StepBlocked(f"Журнал хадгалахад анхааруулга: {msg}", skip_flow=True, category="validation")
     if await ui.dialog_count(env) >= level:               # журнал хадгалаад нээлттэй үлдсэн — хаана
         await ui.close_form(env, keep=form_level)
 
