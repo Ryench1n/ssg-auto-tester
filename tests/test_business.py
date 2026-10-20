@@ -308,7 +308,9 @@ def test_phase2_order_to_cash_site_scenario_is_self_contained(tmp_path):
     assert "Бодит харилцагч" not in sale and "1201 Дансны авлага" in sale, sale       # зээлээр, тест харилцагч
     assert "Тоо хэмжээ=1" in sale and "Нэгж үнэ=1000" in sale and "Сав баглааны" not in sale, sale
     assert "хэвлэх цонх" in " ".join(by["Кассын орлого: тест харилцагчаас 1000₮"]["notes"])     # хадгалалт амжилттай
-    assert "мөрийн grid баганууд: Данс, Дебет, Кредит" in " ".join(by["Кассын орлого: тест харилцагчаас 1000₮"]["notes"])
+    pay = " ".join(by["Кассын орлого: тест харилцагчаас 1000₮"]["notes"])
+    # «Журнал (F6)» → «Шинэ»: Дт 100101 Касс / Кт 120101 Авлага (журналгүй бол ордер ГД-д бичигддэггүй)
+    assert "Журнал (Журнал (F6))" in pay and "100101" in pay and "120101" in pay and "Дебет=1000" in pay and "Кредит=1000" in pay, pay
     assert "Ажил үйлчилгээ" in " ".join(by["Тест үйлчилгээ (бараа) үүсгэх — 1000₮"]["notes"])    # анхдагч «Бараа»-г сольсон
     for name in ("Цэвэрлэх: тест үйлчилгээ", "Цэвэрлэх: тест харилцагч"):
         assert "Устгав" in " ".join(by[name]["notes"]), (name, by[name]["notes"])

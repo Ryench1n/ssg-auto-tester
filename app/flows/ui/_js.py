@@ -293,18 +293,23 @@ MARK_LOOKUP_ROW_JS = r"""
 # ---- Баримтын мөрийн (inline edit) grid ------------------------------------------------------------
 # Формын дотор "+" (fa-plus) командтай grid → мөр нэмэх товч, баганын толгойнууд
 MARK_LINES_ADD_JS = r"""
-([sel]) => {
+([sel, addText]) => {
   /*__COMMON__*/
   document.querySelectorAll('[data-ssg-lineadd], [data-ssg-linegrid]').forEach(e => {
     e.removeAttribute('data-ssg-lineadd'); e.removeAttribute('data-ssg-linegrid'); });
   const root = __scope(sel, 'dialog') || document;
   const grids = Array.from(root.querySelectorAll('dxbl-grid, .dxbl-grid')).filter(__vis)
     .filter(g => g.tagName !== 'DXBL-TREE-LIST' && !g.closest('dxbl-tree-list'));
+  // addText: мөр нэмэх товч grid-ийн гадна, цонхны toolbar-т (ж: кассын ордерын «Журнал (F6)» — «Шинэ»). Зөвхөн
+  // дуудагч тодорхой заасан үед (баримтын формын «Шинэ» нь ШИНЭ БАРИМТ — хэзээ ч таамаглахгүй)
+  const outside = addText ? Array.from(root.querySelectorAll('button, [role=button], .dxbl-toolbar-item')).filter(__vis)
+    .find(b => __txt(b).trim().toLowerCase() === String(addText).toLowerCase()) : null;
   for (const g of grids) {
     const btns = Array.from(g.querySelectorAll('button, [role=button]')).filter(__vis);
     const btn = btns.find(b => b.querySelector('.fa-plus, [class*=fa-plus]'))
       || btns.find(b => /^\+$|^\+\s*шинэ$|^мөр нэмэх$/i.test(__txt(b).trim()))
-      || btns.find(b => /^(add|new|нэмэх|мөр нэмэх)$/i.test((b.getAttribute('title') || b.getAttribute('aria-label') || '').trim()));
+      || btns.find(b => /^(add|new|нэмэх|мөр нэмэх)$/i.test((b.getAttribute('title') || b.getAttribute('aria-label') || '').trim()))
+      || outside;
     if (!btn) continue;
     btn.setAttribute('data-ssg-lineadd', '1');
     g.setAttribute('data-ssg-linegrid', '1');

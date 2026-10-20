@@ -123,7 +123,7 @@ COMPUTED_WORDS = ["үлдэгдэл", "зөрүү", "нийт", "balance", "tota
 
 
 async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] | None = None,
-                     cells: dict[str, str] | None = None) -> dict | None:
+                     cells: dict[str, str] | None = None, add_text: str | None = None) -> dict | None:
     """Формын мөрийн grid-д мөр нэмж бөглөнө. Grid байхгүй бол None.
 
     - Эхний lookup багана (Дансны код / Барааны код) — lookup-оос эхний утгыг сонгоно.
@@ -135,14 +135,14 @@ async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] |
     «Нэгж үнэ» — «Сав баглааны тоо» мэт өөр «тоо» баганад бичихээс сэргийлнэ). Нэг мөр.
     Буцаах: {"lines": [...тайлбар], "error": ""}"""
     cells_spec = dict(cells or {})
-    info = await env.page.evaluate(MARK_LINES_ADD_JS, [sel_payload(env)])
+    info = await env.page.evaluate(MARK_LINES_ADD_JS, [sel_payload(env), add_text])
     if not info:
         # Мөрийн grid формын өөр таб дээр байж болно («Данс» / «Бусад» — Accounting журнал)
         n = await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), -1])
         for i in range(min(n, 12)):
             await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), i])
             await asyncio.sleep(0.4)
-            info = await env.page.evaluate(MARK_LINES_ADD_JS, [sel_payload(env)])
+            info = await env.page.evaluate(MARK_LINES_ADD_JS, [sel_payload(env), add_text])
             if info:
                 break
     if not info:
@@ -161,7 +161,7 @@ async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] |
     lines: list[str] = []
     for n_line, target in enumerate(targets):
         want = str((accounts or [])[n_line]) if accounts and n_line < len(accounts) else ""
-        if not await env.page.evaluate(MARK_LINES_ADD_JS, [sel_payload(env)]):
+        if not await env.page.evaluate(MARK_LINES_ADD_JS, [sel_payload(env), add_text]):
             return {"lines": lines, "error": "мөр нэмэх товч дахин олдсонгүй"}
         env._line_hint = ""
         await env.page.click("[data-ssg-lineadd='1']", timeout=5000)

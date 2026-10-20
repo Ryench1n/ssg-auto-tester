@@ -385,6 +385,8 @@ async def _auto_create(env, args: dict) -> dict:
             env.note("Хадгалахын өмнөх форм — " + " | ".join(await ui.survey_tabs(env, shot_prefix=f"pre-{flow}", with_values=True)))
         for btn in args.get("inspect") or []:
             await _inspect_button(env, form_level, str(btn))
+        if args.get("journal"):
+            await _fill_journal(env, form_level, args["journal"])
         keep = {(_field_for(fields, str(k)) or {}).get("label", k) for k in [*(args.get("prefer") or {}), *(args.get("values") or {})]}
         await _save_with_lines(env, form_level, values, picked, line_spec=args.get("lines") or {}, keep=keep)
     except StepFailed as e:
@@ -522,6 +524,49 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
     raise last
 
 
+async def _fill_journal(env, form_level: int, spec: dict) -> None:
+    """Баримтын ГД-ийн мөрийг тусдаа цонхонд оруулна (testaccounting кассын ордер: «Журнал (F6)» → toolbar «Шинэ» →
+    Дансны код / Дебет / Кредит → «Хадгалах»). spec: {button, add, save, debit, credit, amount}.
+    Бодит ордерууд ийм хоёр мөртэй (КО100001: Дт 100101 Касс / Кт 120101 Дансны авлага, 2026-10-20)."""
+    button = str(spec.get("button") or "Журнал (F6)")
+    try:
+        await ui.click_button(env, [button], scope="dialog", wait_s=2)
+    except StepFailed:
+        await ui.click_button(env, [button], scope="page", wait_s=2)
+    for _ in range(20):
+        if await ui.dialog_count(env) > form_level:
+            break
+        await asyncio.sleep(0.25)
+    else:
+        raise StepBlocked(f"«{button}» дарахад журналын цонх нээгдсэнгүй", skip_flow=True, category="tool")
+    level = await ui.dialog_count(env)
+    await ui.settle(env, 5)
+    res = await ui.fill_lines(env, str(spec.get("amount") or "1"),
+                              [spec[k] for k in ("debit", "credit") if spec.get(k)] or None,
+                              add_text=str(spec.get("add") or "Шинэ"))
+    if res is None or res["error"]:
+        await ui.close_form(env, keep=form_level)
+        raise StepBlocked(f"Журналын мөр бөглөж чадсангүй: {(res or {}).get('error') or 'мөрийн grid олдсонгүй'}",
+                          skip_flow=True, category="tool")
+    env.note(f"Журнал ({button}): " + " | ".join(res["lines"]))
+    try:
+        await ui.click_button(env, [str(spec.get("save") or "Хадгалах")], scope="dialog", wait_s=2)
+    except StepFailed:
+        await ui.close_form(env, keep=form_level)
+        raise StepBlocked("Журналын «Хадгалах» товч олдсонгүй", skip_flow=True, category="tool")
+    await asyncio.sleep(0.5)
+    await ui.settle(env, 5)
+    errors, warnings = await ui.popup_problems(env)
+    if errors:
+        raise StepFailed(f"Журнал хадгалахад: {errors[0].text}", errors)
+    if warnings:
+        msg = " | ".join(w.text.replace("\n", " ")[:150] for w in warnings)
+        await ui.close_form(env, keep=form_level)
+        raise StepBlocked(f"Журнал хадгалахад анхааруулга: {msg}", warnings, skip_flow=True, category="validation")
+    if await ui.dialog_count(env) >= level:               # журнал хадгалаад нээлттэй үлдсэн — хаана
+        await ui.close_form(env, keep=form_level)
+
+
 async def _inspect_button(env, form_level: int, text: str) -> None:
     """Калибровк: формын товчийг (ж: кассын ордерын «Журнал (F6)») дарж юу нээгдсэнийг (цонхны текст, талбарууд, мөрийн
     grid-ийн багана) тайланд бичээд ХАДГАЛАХГҮЙ хаана. Үндсэн формд өөрчлөлт хийхгүй."""
@@ -543,7 +588,7 @@ async def _inspect_button(env, form_level: int, text: str) -> None:
     probe = await ui.probe(env)
     opened = await ui.dialog_count(env) > form_level
     top = (probe.get("dialogs") or [{}])[-1].get("text", "").replace("\n", " | ")[:500] if opened else ""
-    lines = await env.page.evaluate(ui.MARK_LINES_ADD_JS, [ui.sel_payload(env)])
+    lines = await env.page.evaluate(ui.MARK_LINES_ADD_JS, [ui.sel_payload(env), None])
     fields = await ui.scan_form(env, wait_s=0) if opened else []
     env.note(f"«{text}» дарахад: {'шинэ цонх' if opened else 'цонх нээгдээгүй'}"
              + (f"; текст: {top}" if top else "")
