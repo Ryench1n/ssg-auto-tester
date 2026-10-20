@@ -379,6 +379,10 @@ async def _auto_create(env, args: dict) -> dict:
         if args.get("try_as"):
             # Хадгалах оролдлого — «Хадгалах боломжгүй» алдаа гарсан ч бичлэг үүссэн байж болно (цэвэрлэгээ)
             env.ctx.data[args["try_as"]] = values[key]
+        if args.get("survey"):
+            # Калибровк: хадгалахын өмнө таб бүрийн хоосон талбарууд (ж: кассын орлогын харьцсан данс хаана байна)
+            flow = re.sub(r"[^\w-]+", "_", getattr(env, "flow_name", ""), flags=re.U).strip("_")[:30]
+            env.note("Хадгалахын өмнөх форм — " + " | ".join(await ui.survey_tabs(env, shot_prefix=f"pre-{flow}", with_values=True)))
         keep = {(_field_for(fields, str(k)) or {}).get("label", k) for k in [*(args.get("prefer") or {}), *(args.get("values") or {})]}
         await _save_with_lines(env, form_level, values, picked, line_spec=args.get("lines") or {}, keep=keep)
     except StepFailed as e:

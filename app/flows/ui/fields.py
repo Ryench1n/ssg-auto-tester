@@ -209,7 +209,7 @@ async def form_tabs(env: "FlowEngine", click: int = -1) -> list[str]:
         return []
 
 
-async def survey_tabs(env: "FlowEngine", shot_prefix: str = "") -> list[str]:
+async def survey_tabs(env: "FlowEngine", shot_prefix: str = "", with_values: bool = False) -> list[str]:
     """Оношлогоо: формын дотоод таб бүрийг нээж хоосон талбаруудыг жагсаана (+ screenshot) — ж. «Данс сонгогдоогүй»
     гарсан ч толгойн «Данс» бөглөгдсөн үед аль табын аль талбар дутуу байгааг харуулна. Эхний табаа сэргээнэ."""
     from app.flows.ui.page import scan_form
@@ -223,7 +223,12 @@ async def survey_tabs(env: "FlowEngine", shot_prefix: str = "") -> list[str]:
         fields = await scan_form(env, wait_s=0)
         empty = [f["label"] + ("*" if f.get("required") else "") for f in fields
                  if not (f.get("value") or "").strip() and f.get("type") not in ("checkbox", "radio")]
-        out.append(f"[{name or 'форм'}] хоосон: {', '.join(empty) or '—'}")
+        if with_values:
+            filled = [f"{f['label']}={(f.get('value') or '').strip()[:30]}" for f in fields
+                      if (f.get("value") or "").strip() and f.get("type") not in ("checkbox", "radio")]
+            out.append(f"[{name or 'форм'}] бөглөсөн: {', '.join(filled) or '—'}; хоосон: {', '.join(empty) or '—'}")
+        else:
+            out.append(f"[{name or 'форм'}] хоосон: {', '.join(empty) or '—'}")
         if shot_prefix:
             try:
                 await env.page.screenshot(path=str(env.run_dir / "shots" / f"{shot_prefix}-tab{i}.png"), timeout=5000)

@@ -1258,9 +1258,9 @@ function cashForm(kind) {
     <button class="dxbl-btn save">Хадгалах & Гарах</button></div>`);
   m.querySelector('.lk-cust').onclick = () => smartLookup('Харилцагч', saleCustomers(), false, (it) => {
     m.querySelector('[name=cust]').value = it.code + ' ' + it.name; });
-  // testaccounting: «Данс» = ХАРЬЦСАН (кредит) данс; касс автоматаар. Эхний мөр — авлагын биш данс
+  // testaccounting (2026-10-19): «Данс» lookup-д зөвхөн КАССЫН данснууд (эхнийх нь тест данс «00099901 Testcomplete»)
   m.querySelector('.lk-acc').onclick = () => smartLookup('Данс', [{code: '00099901', name: 'Testcomplete'},
-    {code: '1201', name: 'Дансны авлага'}], false, (it) => {
+    {code: '100101', name: 'Касс дахь мөнгө /төгрөг/'}], false, (it) => {
     m.querySelector('[name=acc]').value = it.code + ' ' + it.name; });
   m.querySelector('.dxbl-popup-header-button').onclick = () => m.remove();
   m.querySelector('.save').onclick = () => {
@@ -1273,8 +1273,10 @@ function cashForm(kind) {
     const row = {id: ++st.seq, desc, cust, acc, amount: amt, kind};
     st.rows.push(row);
     journals.push({id: ++jseq, desc, amount: amt, src: 'cash' + row.id,
-      lines: [{code: '1001', name: 'Касс дахь мөнгө', debit: income ? amt : 0, credit: income ? 0 : amt, cust},
-              {code: acc, name: '', debit: income ? 0 : amt, credit: income ? amt : 0, cust}]});
+      // ТААМАГ (бодитоор батлагдаагүй): харьцсан тал — харилцагчийн авлага (1201). Бодит апп-д «Данс»=00099901 +
+      // харилцагчтай ордер авлагыг хаагаагүй — survey/show_rows-ийн дүнгээр засна
+      lines: [{code: acc, name: '', debit: income ? amt : 0, credit: income ? 0 : amt, cust},
+              {code: '1201', name: 'Дансны авлага', debit: income ? 0 : amt, credit: income ? amt : 0, cust}]});
     m.remove(); render();
     // testaccounting: хадгалсны дараа баримтын хэвлэх цонх (report viewer) автоматаар нээгдэнэ
     const pv = $(`<div class="dxbl-modal" role="dialog"><div class="dxbl-popup-header">Хэвлэх

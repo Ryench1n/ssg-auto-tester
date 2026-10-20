@@ -277,6 +277,13 @@ async def report_read(env, args: dict) -> dict:
     if problems:
         raise StepFailed("Тайлангаас утга уншиж чадсангүй: " + "; ".join(problems))
     env.note("Тайлан: " + ", ".join(f"{k}={v:,.2f}" for k, v in values.items()))
+    if args.get("show_rows"):
+        # Аль данс/мөрөөр бичигдсэнийг тайланд (ж: кассын орлого аль дансыг кредитлэсэн) — оношлогоо/нотолгоо
+        for m in dict.fromkeys(str(s["match"]) for s in (args.get("rows") or {}).values()):
+            own = [r for r in by_match.get(m, rows) if any(_norm(m) in _norm(x) for x in r)]
+            if own:
+                env.note(f"«{m}» мөрүүд ({' | '.join(headers)}): "
+                         + " || ".join(" | ".join(c for c in r if c) for r in own[:6]))
     return {args.get("save_as", "report"): values}
 
 
