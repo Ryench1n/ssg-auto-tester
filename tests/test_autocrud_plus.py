@@ -356,3 +356,20 @@ def test_group_required_from_tree_is_selected_and_retried(deps_run):
     assert fl["status"] == M.PASS, steps_of(fl)
     assert fl["meta"]["group"] == "Санхүү"
     assert "бүлгийн модноос «Санхүү» сонгоод" in " ".join(fl["steps"][0]["notes"])
+
+
+@e2e
+def test_outage_mid_run_is_recovered_not_reported_as_bugs(tmp_path):
+    """testaccounting 2026-10-21: апп эвдэрсний (цэсний мод алга, runtime «амьд») дараа 118 цэс дараалан «цэс
+    олдсонгүй» гэж Fail болсон. Одоо: орчны тасалдлын шинжтэй урсгалыг апп-ыг дахин ачаалж дахин шалгана → Pass."""
+    from tests.test_autocrud import CUSTOMERS, CATS
+    outage = key_of("Мастер дата", "Бүртгэл", "Тасалдал", "/md/outagelist")
+    with CrudServer() as srv:
+        srv.state.crash_menu = True
+        pipe, _ = make_pipe(srv, tmp_path, [{"kind": "autocrud", "menus": [outage, CUSTOMERS, CATS]}], [])
+        data = asyncio.run(pipe.run())
+    by = {f["meta"]["menu_key"]: f for f in data.flows if not f["meta"].get("setup")}
+    cust = by[CUSTOMERS]
+    assert cust["meta"].get("rechecked"), steps_of(cust)              # дахин ачаалж дахин шалгасан
+    assert cust["status"] == M.PASS, steps_of(cust)
+    assert not any("цэс олдсонгүй" in s["message"] for f in data.flows for s in f["steps"] if s["status"] == M.FAIL)

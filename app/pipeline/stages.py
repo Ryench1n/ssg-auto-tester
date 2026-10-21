@@ -50,7 +50,11 @@ INFRA_PATTERNS = ("цэс олдсонгүй", "цэсийг дарж чадса
 
 def infra_broken(run) -> bool:
     """Урсгалын ажилласан бүх алхам орчны тасалдлын шинжтэй мессежээр бүтэлгүйтсэн эсэх."""
-    steps = [s for s in run.steps if not (s.status == M.BLOCKED and s.category in ("nodata", "na"))]
+    # Өмнөх алхмаас хамаарч Blocked болсон алхмууд («Өмнөх алхам #1 … Fail», «Шаардлагатай өгөгдөл алга») өөрсдөө
+    # шинж биш — тэдгээрийг тооцохгүй (автомат CRUD-ийн 8 алхамт урсгал)
+    dependent = ("Өмнөх алхам", "Шаардлагатай өгөгдөл алга")
+    steps = [s for s in run.steps if not (s.status == M.BLOCKED and s.category in ("nodata", "na"))
+             and not (s.status == M.BLOCKED and (s.message or "").startswith(dependent))]
     bad = [s for s in steps if s.status in (M.FAIL, M.BLOCKED)]
     return bool(steps) and len(bad) == len(steps) and all(
         any(p in (s.message or "") for p in INFRA_PATTERNS) for s in bad)
@@ -356,12 +360,24 @@ class AutoCrudStage(Stage):
         if not keys:
             return M.BLOCKED, "Автомат CRUD хийх цэс сонгогдоогүй — алгасав"
         runs = []
-        for key in keys:
+        streak = 0
+        for n, key in enumerate(keys):
             if pipe.halt.is_set():
                 break
             code = pipe.next_auto_code()
             run = await self._flow(pipe, key, code, auto_flow_spec(key, code.lower(), columns=_columns(pipe, key)))
             runs.append(run)
+            # Орчны тасалдал (апп/.NET runtime унасан, цэсний мод алга): бүх цэс дараалан «цэс олдсонгүй» гэж Fail
+            # болдог байсан (testaccounting 2026-10-21: 118 цэс 32 секундэд) — 3 дараалвал зогсоож үлдсэнийг resume-д
+            streak = streak + 1 if run.meta.get("infra") else 0
+            if streak >= 3:
+                rest = list(keys[n + 1:])
+                pipe.data.resume.setdefault(self.kind, []).extend(rest)
+                pipe.runlog.log(f"Автомат CRUD: тест орчин хариу өгөхгүй байна ({streak} цэс дараалан) — зогсоов; "
+                                f"{len(rest)} цэсийг «Үлдсэн цэсүүдийг үргэлжлүүлэх»-ээр дахин ажиллуулна", "error")
+                pipe.data.timeline.append(TimelineEvent(now_iso(), "Автомат CRUD: тест орчин хариу өгөөгүй",
+                                                        M.BLOCKED, f"{len(rest)} цэс хойшлогдов"))
+                break
         runs = await self._retry_with_masters(pipe, keys, runs)
         tested = [r for r in runs if not r.meta.get("skipped")]
         n_pass = sum(1 for r in tested if r.status == M.PASS)
@@ -388,6 +404,22 @@ class AutoCrudStage(Stage):
                          code=code, meta={"auto": True, "menu": menu_path(item), "menu_key": key, **(meta or {})})
         tabs0 = await _tabs(pipe)
         run = await eng.execute(pipe.page, pipe.col)
+        if infra_broken(run) and not pipe.halt.is_set():
+            # Аппын bug биш — апп-ыг дахин ачаалж нэг удаа дахин шалгана
+            first = next((x.message for x in run.steps if x.message), "")[:120]
+            pipe.runlog.log(f"Автомат CRUD: «{menu_path(item)}» — орчны тасалдлын шинж ({first}) — дахин ачаалж "
+                            "дахин шалгана", "warn")
+            await ui.reload_app(eng, "орчны тасалдал (автомат CRUD)")
+            eng = FlowEngine(pipe.url, name, cfg, pipe.run_dir, ctx=pipe.flow_ctx, runlog=pipe.runlog,
+                             session=pipe.session, cancel_event=pipe.halt, emit=pipe.emit, run_id=pipe.run_id,
+                             code=code, meta={"auto": True, "menu": menu_path(item), "menu_key": key, **(meta or {})})
+            run = await eng.execute(pipe.page, pipe.col)
+            run.meta["rechecked"] = True
+            if infra_broken(run):
+                # Дахин ачаалсан ч мөн адил — цэсийг шалгаж чадаагүй (TC/bug үүсгэхгүй), Fail биш
+                run.meta["infra"] = True
+                run.meta["skipped"] = (f"Орчны тасалдал — апп хариу өгөхгүй/цэс олдохгүй байсан тул шалгаагүй "
+                                       f"({next((x.message for x in run.steps if x.message), '')[:120]})")
         try:
             await ui.close_form(eng)          # дараагийн цэсэнд нээлттэй форм/цонх саад болохгүй
             await ui.clear_toasts(eng)        # хуучин анхааруулгын toast дараагийн цэсийг Fail болгохгүй

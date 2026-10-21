@@ -825,11 +825,15 @@ function showResult(s, status, error) {
   for (const [id, k] of [['dlX','xlsx'],['dlD','docx'],['dlS','shots'],['dlR','raw'],['dlL','log'],['dlY','draft']]) $(id).href = `/runs/${runId}/download/${k}`;
   $('dlY').classList.toggle('hidden', !s.draft);
   $('formDl').classList.toggle('hidden', !s.form);
-  const rest = (s.resume && s.resume.formcheck) || [];
-  $('resumeBox').classList.toggle('hidden', !rest.length);
-  if (rest.length) {
-    $('resumeTxt').textContent = `⏸ Session тасарсан/зогсоосны улмаас форм шалгалтын ${rest.length} цэс ажиллаагүй.`;
-    $('btnResume').onclick = () => startRun([{kind: 'formcheck', menus: rest}]);
+  // Ажиллаагүй үлдсэн цэсүүд (session тасарсан / тест орчин хариу өгөөгүй) — форм шалгалт ба автомат CRUD
+  const restSteps = ['formcheck', 'autocrud'].map(k => ({kind: k, menus: (s.resume && s.resume[k]) || []}))
+    .filter(x => x.menus.length);
+  $('resumeBox').classList.toggle('hidden', !restSteps.length);
+  if (restSteps.length) {
+    const lbl = {formcheck: 'форм шалгалтын', autocrud: 'автомат CRUD-ийн'};
+    $('resumeTxt').textContent = '⏸ Session тасарсан / тест орчин хариу өгөөгүйн улмаас '
+      + restSteps.map(x => `${lbl[x.kind]} ${x.menus.length} цэс`).join(', ') + ' ажиллаагүй.';
+    $('btnResume').onclick = () => startRun(restSteps);
   }
   if (s.form) {
     $('dlFX').href = `/runs/${runId}/download/form_xlsx`; $('dlFD').href = `/runs/${runId}/download/form_docx`;

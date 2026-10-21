@@ -111,11 +111,14 @@ SKIP_KINDS = {
     "workflow": "Форм тусгай үйлдэл шаарддаг (мэдээлэл татах, хуваарь …)",
     "validation": "Систем автоматаар бөглөсөн утгыг хүлээж аваагүй",
     "tool": "Хэрэгслийн дотоод алдаа (аппын bug биш)",
+    "infra": "Орчны тасалдал — апп хариу өгөөгүй / цэс олдоогүй (дахин ачаалсан ч)",
     "": "Хэрэгсэл формыг таньж / бөглөж чадаагүй",
 }
 
 
 def auto_skip_kind(flow: dict) -> str:
+    if (flow.get("meta") or {}).get("infra"):
+        return "infra"
     st = next((s for s in flow.get("steps") or [] if s.get("status") == M.BLOCKED), {})
     cat = st.get("category") or ""
     return cat if cat in SKIP_KINDS else ""

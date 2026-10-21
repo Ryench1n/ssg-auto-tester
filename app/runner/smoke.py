@@ -334,6 +334,12 @@ class SmokeRunner:
                         r.confirmation = "1 удаа ажиглагдсан"
                 self.timeline("Давтан баталгаажуулалт", f"{confirmed}/{len(fails)} баталгаажсан",
                               "Fail цэс бүрийг 1 удаа дахин шалгасан")
+                # Дахин шалгасан цэс (ж: «Робот (RPA)») апп-ыг дахин унагаж болно — дараагийн үе шат (автомат CRUD)
+                # эвдэрсэн апп дээр эхэлж 118 цэс «цэс олдсонгүй» болсон (testaccounting 2026-10-21) → эрүүл эсэхийг шалгана
+                st = await snapshot(self.page, self.cfg)
+                mods = await discovery.list_modules(self.page, self.cfg) if st and not st.dead else []
+                if not self.cancel_event.is_set() and (st is None or st.dead or not mods):
+                    await self._recover_crash("давтан баталгаажуулалтын дараа")
         self.data.timeline.sort(key=lambda e: e.at)
 
     # ------------------------------------------------------------- session
