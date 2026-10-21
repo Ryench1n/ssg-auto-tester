@@ -94,7 +94,16 @@ async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True,
 
     try:
         before = await dialog_count(env)
-        await page.click("[data-ssg-lookup='1']", timeout=5000)
+        try:
+            await page.click("[data-ssg-lookup='1']", timeout=5000)
+        except Exception as e:
+            # Grid-ийн баруун захын жижиг «...» (ж: журналын «Мөнгөн гүйлгээний үзүүлэлт» багана, 2026-10-21) —
+            # Playwright «дарагдахгүй» гэж үзсэн; элемент дээр шууд (DOM) дарна
+            log(f"энгийн дарах амжилтгүй ({type(e).__name__}) — DOM-оор дарав")
+            if not await page.evaluate("() => { const b = document.querySelector('[data-ssg-lookup=\"1\"]');"
+                                       " if (!b) return false; b.scrollIntoView({block: 'center', inline: 'center'});"
+                                       " b.click(); return true; }"):
+                raise
         for _ in range(25):
             if await dialog_count(env) > before:
                 break

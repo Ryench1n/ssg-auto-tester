@@ -1294,7 +1294,9 @@ function cashForm(kind) {
           <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.code)}"><button class="dxbl-btn dxbl-text-edit-btn">...</button>` : esc(l.code)}</td>
           <td>${esc(l.name)}</td><td>${num('debit')}</td><td>${num('credit')}</td>
           <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.cust || '')}"><button class="dxbl-btn dxbl-text-edit-btn ck">...</button>` : esc(l.cust || '')}</td>
-          <td style="${showCf ? '' : 'display:none'}">${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.rcf || '')}"><button class="dxbl-btn dxbl-text-edit-btn rk">...</button>` : esc(l.rcf || '')}</td></tr></table>`).querySelector('tr');
+          <td style="position:relative;${showCf ? '' : 'display:none'}">${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.rcf || '')}"><button class="dxbl-btn dxbl-text-edit-btn rk">...</button>
+            <span style="position:absolute;inset:0;background:transparent"></span>` : esc(l.rcf || '')}</td></tr></table>`).querySelector('tr');
+        // Бодит (2026-10-21): баруун захын «...» Playwright-аар дарагдахгүй (Page.click timeout) — дээр нь давхарга
         const rk = tr.querySelector('.rk');
         if (rk) rk.onclick = (e) => { e.stopPropagation(); smartLookup('Мөнгөн гүйлгээний үзүүлэлт', cfItems, false, (it) => {
           l.rcf = it.code; draw(); }); };
