@@ -106,9 +106,44 @@ async def _fill_cell(env: "FlowEngine", i: int, value: str) -> bool:
         await env.page.keyboard.type(str(value))
         await env.page.evaluate("() => document.activeElement && document.activeElement.blur()")
     else:
-        await loc.fill(str(value))
-        await loc.blur()
+        try:
+            await loc.fill(str(value), timeout=5000)
+            await loc.blur()
+        except Exception:
+            # input бөглөгдөхгүй (readonly/давхарга — testaccounting «Үндсэн хөрөнгө / Баримтын жагсаалт» 30 сек гацсан,
+            # 2026-10-21) — фокуслагдсан editor-т гараар бичнэ
+            await env.page.keyboard.press("Control+A")
+            await env.page.keyboard.type(str(value))
+            await env.page.evaluate("() => document.activeElement && document.activeElement.blur()")
     await asyncio.sleep(0.5)
+    return True
+
+
+async def _type_cell(env: "FlowEngine", i: int, value: str) -> bool:
+    """Мөрийн i-р нүдний editor-т кодыг бичиж Enter (lookup-ийн сонголтын цонх нээгдэхгүй үед). Нээгдсэн
+    сонголтын цонх байвал хаана (хадгалахгүй). Бичигдсэн бол True."""
+    if not await _activate_cell(env, i):
+        return False
+    loc = env.page.locator(f"[data-ssg-lrow='1'] [data-ssg-lcell='{i}'] input").first
+    level = await dialog_count(env)
+    try:
+        if await loc.count():
+            await loc.fill(value)
+            await loc.press("Enter")
+        else:
+            await env.page.keyboard.press("Control+A")
+            await env.page.keyboard.type(value)
+            await env.page.keyboard.press("Enter")
+    except Exception:
+        return False
+    await asyncio.sleep(0.6)
+    if await dialog_count(env) > level:            # хайлтын цонх нээгдсэн бол хадгалахгүй хаана
+        await close_form(env, keep=level)
+    try:
+        await env.page.evaluate("() => document.activeElement && document.activeElement.blur()")
+    except Exception:
+        pass
+    await asyncio.sleep(0.3)
     return True
 
 
@@ -254,7 +289,12 @@ async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] |
                 return {"lines": lines, "error": f"'{name(k)}' нүдний «...» товч олдсонгүй"}
             got = await pick_from_lookup(env, f"Мөрийн '{name(k)}' баганын сонголтын", want=str(w))
             if not got:
-                return {"lines": lines, "error": f"'{name(k)}' мөрийн lookup-оос «{w}» сонгож чадсангүй"}
+                # «...» цонх ямар ч аргаар нээгдээгүй (testaccounting журналын «Мөнгөн гүйлгээний үзүүлэлт», 2026-10-21)
+                # — кодыг нүдэнд бичээд Enter (SmartApp-ын кодын талбар бичсэн кодыг танидаг)
+                if await _type_cell(env, k, str(w)):
+                    got = f"{w} (бичсэн)"
+                else:
+                    return {"lines": lines, "error": f"'{name(k)}' мөрийн lookup-оос «{w}» сонгож чадсангүй"}
             part.append(f"{name(k)}={got[:40]}")
             await asyncio.sleep(0.3)
         lines.append(", ".join(part))

@@ -1294,14 +1294,13 @@ function cashForm(kind) {
           <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.code)}"><button class="dxbl-btn dxbl-text-edit-btn">...</button>` : esc(l.code)}</td>
           <td>${esc(l.name)}</td><td>${num('debit')}</td><td>${num('credit')}</td>
           <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.cust || '')}"><button class="dxbl-btn dxbl-text-edit-btn ck">...</button>` : esc(l.cust || '')}</td>
-          <td style="position:relative;${showCf ? '' : 'display:none'}">${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.rcf || '')}"><button class="dxbl-btn dxbl-text-edit-btn rk">...</button>
+          <td style="position:relative;${showCf ? '' : 'display:none'}">${ed ? `<input class="dxbl-text-edit-input rcf-in" value="${esc(l.rcf || '')}"><button class="dxbl-btn dxbl-text-edit-btn rk">...</button>
             <span class="rk-cover" style="position:absolute;inset:0;background:transparent"></span>` : esc(l.rcf || '')}</td></tr></table>`).querySelector('tr');
         // Бодит (2026-10-21): баруун захын «...» Playwright-аар дарагдахгүй (Page.click timeout) — дээр нь давхарга
-        // Бодит (2026-10-21): DOM click() нээдэггүй (DevExpress — mousedown); жинхэнэ хулганы даралт л нээнэ
-        const rk = tr.querySelector('.rk');
-        const openCf = (e) => { e.stopPropagation(); smartLookup('Мөнгөн гүйлгээний үзүүлэлт', cfItems, false, (it) => {
-          l.rcf = it.code; draw(); }); };
-        if (rk) { rk.onmousedown = openCf; tr.querySelector('.rk-cover').onmousedown = openCf; }
+        // Бодит (2026-10-21): энэ «...» ямар ч аргаар (Playwright, хулгана, DOM) цонх нээгээгүй — кодыг бичээд Enter
+        const rin = tr.querySelector('.rcf-in');
+        if (rin) rin.onkeydown = (e) => { if (e.key !== 'Enter') return;
+          const it = cfItems.find(x => x.code === rin.value.trim()); if (it) { l.rcf = it.code; } };
         tr.querySelectorAll('input[data-k]').forEach(x => x.onchange = () => { l[x.dataset.k] = +x.value || 0; });
         // Бодит: «Шинэ»-ээр нэмсэн мөр засварын горимд ОРООГҮЙ — нүд дээр дарахад засварын горимд орно
         if (!ed) tr.querySelectorAll('td').forEach(td => td.onclick = () => { edit = i; draw(); });
