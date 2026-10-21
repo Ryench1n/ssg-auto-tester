@@ -14,6 +14,7 @@ import time
 
 from app import models as M
 from app.flows import ui
+from app.flows.ui._js import _COMMON_JS
 from app.flows.context import StepBlocked, StepFailed
 from app.flows.engine import step
 
@@ -524,6 +525,16 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
     raise last
 
 
+# Дээд цонхны мөрийн grid-ийн i-р мөрийг (засварын бус нүдээр) сонгоно — мөрт хамаарах талбарыг бөглөхийн өмнө
+_FOCUS_ROW_JS = r"""([sel, i]) => { /*__COMMON__*/
+  const root = __scope(sel, 'dialog'); if (!root) return false;
+  const rows = Array.from(root.querySelectorAll('tr[data-visible-index]')).filter(__vis)
+    .filter(r => +r.getAttribute('data-visible-index') >= 0 && !r.closest('dxbl-tree-list'));
+  const r = rows[i]; if (!r) return false;
+  const td = Array.from(r.querySelectorAll('td')).find(c => !c.querySelector('input, button')) || r.querySelector('td');
+  if (td) td.click(); return true; }""".replace("/*__COMMON__*/", _COMMON_JS)
+
+
 async def _fill_journal(env, form_level: int, spec: dict) -> None:
     """Баримтын ГД-ийн мөрийг тусдаа цонхонд оруулна (testaccounting кассын ордер: «Журнал (F6)» → toolbar «Шинэ» →
     Дансны код / Дебет / Кредит → «Хадгалах»). spec: {button, add, save, debit, credit, amount,
@@ -551,6 +562,20 @@ async def _fill_journal(env, form_level: int, spec: dict) -> None:
         raise StepBlocked(f"Журналын мөр бөглөж чадсангүй: {(res or {}).get('error') or 'мөрийн grid олдсонгүй'}",
                           skip_flow=True, category="tool")
     env.note(f"Журнал ({button}): " + " | ".join(res["lines"]))
+    # Журналын цонхны (мөрийн) талбарууд — ж: «Мөнгөн гүйлгээ» (кассын мөрийн мөнгөн гүйлгээний үзүүлэлт; «Мөнгөн
+    # гүйлгээний үзүүлэлт сонгогдоогүй байна !», 2026-10-21). Талбар сонгосон мөрт хамаардаг тул эхлээд тэр мөрийг сонгоно.
+    if spec.get("fields"):
+        row = int(spec.get("fields_row", 0))
+        await env.page.evaluate(_FOCUS_ROW_JS, [ui.sel_payload(env), row])
+        await asyncio.sleep(0.4)
+        for label, want in spec["fields"].items():
+            try:
+                val = await ui.pick_option(env, str(label), want=str(want))
+            except StepFailed:
+                val = ""
+            if await ui.dialog_count(env) > level:
+                await ui.close_form(env, keep=level)
+            env.note(f"Журнал: {label}=" + (val[:60] if val else f"«{want}» сонгож чадсангүй"))
     try:
         await ui.click_button(env, [str(spec.get("save") or "Хадгалах")], scope="dialog", wait_s=2)
     except StepFailed:

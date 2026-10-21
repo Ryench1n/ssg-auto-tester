@@ -1268,7 +1268,12 @@ function cashForm(kind) {
       <div class="dxbl-toolbar"><button class="dxbl-btn jsave">Хадгалах</button> <button class="dxbl-btn jnew">Шинэ</button>
         <button class="dxbl-btn">Устгах</button></div>
       <dxbl-grid class="dxbl-grid" style="display:block"><table><thead><tr class="dxbl-grid-header-row">
-        <th>Дансны код</th><th>Дансны нэр</th><th>Дебет</th><th>Кредит</th><th>Харилцагч</th></tr></thead><tbody></tbody></table></dxbl-grid></div>`);
+        <th>Дансны код</th><th>Дансны нэр</th><th>Дебет</th><th>Кредит</th><th>Харилцагч</th></tr></thead><tbody></tbody></table></dxbl-grid>
+      <div class="dxbl-fl">${lookupField('Мөнгөн гүйлгээ', 'cf', '')}</div></div>`);
+    // Бодит (2026-10-21): «Мөнгөн гүйлгээ» — СОНГОСОН мөрийн мөнгөн гүйлгээний үзүүлэлт; кассын мөрөнд заавал
+    j.querySelector('.lk-cf').onclick = () => smartLookup('Мөнгөн гүйлгээ', [{code: '1100', name: 'Үндсэн үйл ажиллагааны бусад'},
+      {code: '1110', name: 'Бараа борлуулсан, үйлчилгээ үзүүлсний орлого'}], false, (it) => {
+      if (edit != null && work[edit]) work[edit].cf = it.code; j.querySelector('[name=cf]').value = it.code + ' ' + it.name; });
     const tb = j.querySelector('tbody');
     const cust = () => m.querySelector('[name=cust]').value.split(' ')[0];
     const draw = () => {
@@ -1299,6 +1304,8 @@ function cashForm(kind) {
       const ok = work.filter(l => l.code && (l.debit > 0 || l.credit > 0));
       const d = ok.reduce((a, l) => a + l.debit, 0), c = ok.reduce((a, l) => a + l.credit, 0);
       if (work.some(l => !l.code)) return warnModal('Данс сонгогдоогүй байна.');
+      if (work.some(l => String(l.code).startsWith('1001') && !l.cf))
+        return warnModal('Хадгалах боломжгүй байна Мөнгөн гүйлгээний үзүүлэлт сонгогдоогүй байна !');
       if (work.some(l => String(l.code).startsWith('1201') && !l.cust))
         return warnModal('Хадгалах боломжгүй байна Журналын мэдээлэл дээр авлага, өглөгийн данс сонгосон бол харилцагч оруулна уу !');
       if (d !== c) return warnModal('Дебет кредит тэнцэхгүй байна !');
