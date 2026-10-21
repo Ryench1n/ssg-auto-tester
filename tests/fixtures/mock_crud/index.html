@@ -1268,26 +1268,36 @@ function cashForm(kind) {
       <div class="dxbl-toolbar"><button class="dxbl-btn jsave">Хадгалах</button> <button class="dxbl-btn jnew">Шинэ</button>
         <button class="dxbl-btn">Устгах</button></div>
       <dxbl-grid class="dxbl-grid" style="display:block"><table><thead><tr class="dxbl-grid-header-row">
-        <th>Дансны код</th><th>Дансны нэр</th><th>Дебет</th><th>Кредит</th><th>Харилцагч</th></tr></thead><tbody></tbody></table></dxbl-grid>
-      <div class="dxbl-fl">${lookupField('Мөнгөн гүйлгээ', 'cf', '')}</div></div>`);
+        <th>Дансны код</th><th>Дансны нэр</th><th>Дебет</th><th>Кредит</th><th>Харилцагч</th>
+        <th class="cfcol" style="display:none">Мөнгөн гүйлгээний үзүүлэлт</th></tr></thead><tbody></tbody></table></dxbl-grid>
+      <div class="dxbl-fl">${lookupField('Мөнгөн гүйлгээ', 'cf', '')}
+        <div class="dxbl-fl-item"><label class="dxbl-fl-cpt">Мөнгөн гүйлгээний үзүүлэлт:</label><div class="dxbl-fl-ctrl">
+          <input type="checkbox" name="showcf"></div></div></div></div>`);
+    // Бодит (2026-10-21 таамаг): checkbox — мөр бүрийн «Мөнгөн гүйлгээний үзүүлэлт» баганыг харуулна; кассын мөрөнд заавал
+    let showCf = false;
+    j.querySelector('[name=showcf]').onchange = (e) => { showCf = e.target.checked;
+      j.querySelector('th.cfcol').style.display = showCf ? '' : 'none'; draw(); };
+    const cfItems = [{code: '1.2.2', name: 'Нийгмийн даатгалын байгууллагад төлсөн'},
+      {code: '2.1.3', name: 'Хөрөнгө оруулалт борлуулсны орлого'}, {code: '1.1.1', name: 'Бараа борлуулсан, үйлчилгээ үзүүлсний орлого'}];
     // Бодит (2026-10-21): «Мөнгөн гүйлгээ» — СОНГОСОН мөрийн мөнгөн гүйлгээний үзүүлэлт; кассын мөрөнд заавал
     // Бодит жагсаалт: «2.1.3 Хөрөнгө оруулалт борлуулсны орлого» нь «1.1.1 Бараа борлуулсан…»-ээс ӨМНӨ
-    j.querySelector('.lk-cf').onclick = () => smartLookup('Мөнгөн гүйлгээний үзүүлэлт', [{code: '1.2.2', name: 'Нийгмийн даатгалын байгууллагад төлсөн'},
-      {code: '2.1.3', name: 'Хөрөнгө оруулалт борлуулсны орлого'}, {code: '1.1.1', name: 'Бараа борлуулсан, үйлчилгээ үзүүлсний орлого'}], false, (it) => {
+    j.querySelector('.lk-cf').onclick = () => smartLookup('Мөнгөн гүйлгээний үзүүлэлт', cfItems, false, (it) => {
       if (edit != null && work[edit]) work[edit].cf = it.code; j.querySelector('[name=cf]').value = it.code + ' ' + it.name; });
     const tb = j.querySelector('tbody');
     const cust = () => m.querySelector('[name=cust]').value.split(' ')[0];
     const draw = () => {
       tb.innerHTML = '';
-      // «Мөнгөн гүйлгээ» талбар СОНГОСОН мөрийн утгыг харуулна
-      const cfi = j.querySelector('[name=cf]'); if (cfi) cfi.value = (work[edit] || {}).cf || '';
       work.forEach((l, i) => {
         const ed = i === edit;
         const num = (k) => ed ? `<input class="dxbl-text-edit-input" data-k="${k}" value="${l[k]}">` : String(l[k]);
         const tr = $(`<table><tr role="row" ${ed ? (l.code ? `data-visible-index="${i}" class="dxbl-grid-edit-row"` : 'data-visible-index="-1" class="dxbl-grid-edit-row dxbl-grid-edit-new-item-row-inplace"') : `data-visible-index="${i}"`}>
           <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.code)}"><button class="dxbl-btn dxbl-text-edit-btn">...</button>` : esc(l.code)}</td>
           <td>${esc(l.name)}</td><td>${num('debit')}</td><td>${num('credit')}</td>
-          <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.cust || '')}"><button class="dxbl-btn dxbl-text-edit-btn ck">...</button>` : esc(l.cust || '')}</td></tr></table>`).querySelector('tr');
+          <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.cust || '')}"><button class="dxbl-btn dxbl-text-edit-btn ck">...</button>` : esc(l.cust || '')}</td>
+          <td style="${showCf ? '' : 'display:none'}">${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.rcf || '')}"><button class="dxbl-btn dxbl-text-edit-btn rk">...</button>` : esc(l.rcf || '')}</td></tr></table>`).querySelector('tr');
+        const rk = tr.querySelector('.rk');
+        if (rk) rk.onclick = (e) => { e.stopPropagation(); smartLookup('Мөнгөн гүйлгээний үзүүлэлт', cfItems, false, (it) => {
+          l.rcf = it.code; draw(); }); };
         tr.querySelectorAll('input[data-k]').forEach(x => x.onchange = () => { l[x.dataset.k] = +x.value || 0; });
         // Бодит: «Шинэ»-ээр нэмсэн мөр засварын горимд ОРООГҮЙ — нүд дээр дарахад засварын горимд орно
         if (!ed) tr.querySelectorAll('td').forEach(td => td.onclick = () => { edit = i; draw(); });
@@ -1307,8 +1317,8 @@ function cashForm(kind) {
       const ok = work.filter(l => l.code && (l.debit > 0 || l.credit > 0));
       const d = ok.reduce((a, l) => a + l.debit, 0), c = ok.reduce((a, l) => a + l.credit, 0);
       if (work.some(l => !l.code)) return warnModal('Данс сонгогдоогүй байна.');
-      // ТААМАГ (2026-10-21): кассын мөрөнд л заахад анхааруулга хэвээр байсан — мөр бүрт шаардана
-      if (work.some(l => !l.cf))
+      // ТААМАГ (2026-10-21): доод талбар (журналын) хангалтгүй — кассын мөрийн баганын үзүүлэлт заавал
+      if (work.some(l => String(l.code).startsWith('1001') && !l.rcf))
         return warnModal('Хадгалах боломжгүй байна Мөнгөн гүйлгээний үзүүлэлт сонгогдоогүй байна !');
       if (work.some(l => String(l.code).startsWith('1201') && !l.cust))
         return warnModal('Хадгалах боломжгүй байна Журналын мэдээлэл дээр авлага, өглөгийн данс сонгосон бол харилцагч оруулна уу !');

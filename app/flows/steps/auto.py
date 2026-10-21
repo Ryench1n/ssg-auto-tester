@@ -553,6 +553,14 @@ async def _fill_journal(env, form_level: int, spec: dict) -> None:
         raise StepBlocked(f"«{button}» дарахад журналын цонх нээгдсэнгүй", skip_flow=True, category="tool")
     level = await ui.dialog_count(env)
     await ui.settle(env, 5)
+    # Нэмэлт багана харуулах checkbox (ж: «Мөнгөн гүйлгээний үзүүлэлт» — мөр бүрийн үзүүлэлтийн багана, 2026-10-21)
+    for label in spec.get("toggles") or []:
+        try:
+            await ui.fill_field(env, str(label), True)
+            await asyncio.sleep(0.5)
+            env.note(f"Журнал: «{label}» тэмдэглэв")
+        except StepFailed as e:
+            env.note(f"Журнал: «{label}» тэмдэглэж чадсангүй ({e})")
     res = await ui.fill_lines(env, str(spec.get("amount") or "1"),
                               [spec[k] for k in ("debit", "credit") if spec.get(k)] or None,
                               add_text=str(spec.get("add") or "Шинэ"),
@@ -577,6 +585,10 @@ async def _fill_journal(env, form_level: int, spec: dict) -> None:
             if await ui.dialog_count(env) > level:
                 await ui.close_form(env, keep=level)
             env.note(f"Журнал мөр {int(row) + 1}: {label}=" + (val[:60] if val else f"«{want}» сонгож чадсангүй"))
+    try:                                                 # калибровк: журналын бөглөсөн төлөв
+        await env.page.screenshot(path=str(env.run_dir / "shots" / "journal-before-save.png"), timeout=5000)
+    except Exception:
+        pass
     try:
         await ui.click_button(env, [str(spec.get("save") or "Хадгалах")], scope="dialog", wait_s=2)
     except StepFailed:

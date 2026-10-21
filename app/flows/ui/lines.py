@@ -246,7 +246,8 @@ async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] |
             if k is None:
                 k = next((i for i, h in enumerate(headers) if want_h in _hnorm(h)), None)
             if k is None:
-                return {"lines": lines, "error": f"мөрийн grid-д «{col_name}» багана алга"}
+                return {"lines": lines, "error": f"мөрийн grid-д «{col_name}» багана алга "
+                                                 f"(баганууд: {', '.join(h for h in info['headers'] if h)[:200]})"}
             await _activate_cell(env, k)
             if not await env.page.evaluate(MARK_CELL_LOOKUP_JS, k):
                 await _dump_line_row(env, f"no-lookup-{k}")
