@@ -526,7 +526,8 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
 
 async def _fill_journal(env, form_level: int, spec: dict) -> None:
     """Баримтын ГД-ийн мөрийг тусдаа цонхонд оруулна (testaccounting кассын ордер: «Журнал (F6)» → toolbar «Шинэ» →
-    Дансны код / Дебет / Кредит → «Хадгалах»). spec: {button, add, save, debit, credit, amount}.
+    Дансны код / Дебет / Кредит → «Хадгалах»). spec: {button, add, save, debit, credit, amount,
+    lookups: {credit: {"Харилцагч": "<тест харилцагч>"}}}.
     Бодит ордерууд ийм хоёр мөртэй (КО100001: Дт 100101 Касс / Кт 120101 Дансны авлага, 2026-10-20)."""
     button = str(spec.get("button") or "Журнал (F6)")
     try:
@@ -543,7 +544,8 @@ async def _fill_journal(env, form_level: int, spec: dict) -> None:
     await ui.settle(env, 5)
     res = await ui.fill_lines(env, str(spec.get("amount") or "1"),
                               [spec[k] for k in ("debit", "credit") if spec.get(k)] or None,
-                              add_text=str(spec.get("add") or "Шинэ"))
+                              add_text=str(spec.get("add") or "Шинэ"),
+                              line_lookups=[(spec.get("lookups") or {}).get(k) or {} for k in ("debit", "credit")])
     if res is None or res["error"]:
         await ui.close_form(env, keep=form_level)
         raise StepBlocked(f"Журналын мөр бөглөж чадсангүй: {(res or {}).get('error') or 'мөрийн grid олдсонгүй'}",

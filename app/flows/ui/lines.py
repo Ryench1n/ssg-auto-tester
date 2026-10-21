@@ -124,7 +124,8 @@ COMPUTED_WORDS = ["үлдэгдэл", "зөрүү", "нийт", "balance", "tota
 
 
 async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] | None = None,
-                     cells: dict[str, str] | None = None, add_text: str | None = None) -> dict | None:
+                     cells: dict[str, str] | None = None, add_text: str | None = None,
+                     line_lookups: list[dict] | None = None) -> dict | None:
     """Формын мөрийн grid-д мөр нэмж бөглөнө. Grid байхгүй бол None.
 
     - Эхний lookup багана (Дансны код / Барааны код) — lookup-оос эхний утгыг сонгоно.
@@ -236,6 +237,25 @@ async def fill_lines(env: "FlowEngine", amount: str = "1", accounts: list[str] |
                 await close_form(env, keep=level)
                 return {"lines": lines, "error": f"'{name(num)}' нүдэнд бичихэд сонголтын цонх нээгдлээ"}
             part.append(f"{name(num)}={amount}")
+        # Мөр бүрийн нэмэлт сонголтын багана (ж: журналын авлагын мөрийн «Харилцагч» — «авлага, өглөгийн данс
+        # сонгосон бол харилцагч оруулна уу !», testaccounting 2026-10-20)
+        extra = (line_lookups[n_line] if line_lookups and n_line < len(line_lookups) else None) or {}
+        for col_name, w in extra.items():
+            want_h = _hnorm(col_name)
+            k = next((i for i, h in enumerate(headers) if _hnorm(h) == want_h), None)
+            if k is None:
+                k = next((i for i, h in enumerate(headers) if want_h in _hnorm(h)), None)
+            if k is None:
+                return {"lines": lines, "error": f"мөрийн grid-д «{col_name}» багана алга"}
+            await _activate_cell(env, k)
+            if not await env.page.evaluate(MARK_CELL_LOOKUP_JS, k):
+                await _dump_line_row(env, f"no-lookup-{k}")
+                return {"lines": lines, "error": f"'{name(k)}' нүдний «...» товч олдсонгүй"}
+            got = await pick_from_lookup(env, f"Мөрийн '{name(k)}' баганын сонголтын", want=str(w))
+            if not got:
+                return {"lines": lines, "error": f"'{name(k)}' мөрийн lookup-оос «{w}» сонгож чадсангүй"}
+            part.append(f"{name(k)}={got[:40]}")
+            await asyncio.sleep(0.3)
         lines.append(", ".join(part))
     return {"lines": lines, "error": ""}
 

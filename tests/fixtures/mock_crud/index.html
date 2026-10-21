@@ -1278,14 +1278,19 @@ function cashForm(kind) {
         const num = (k) => ed ? `<input class="dxbl-text-edit-input" data-k="${k}" value="${l[k]}">` : String(l[k]);
         const tr = $(`<table><tr role="row" ${ed ? (l.code ? `data-visible-index="${i}" class="dxbl-grid-edit-row"` : 'data-visible-index="-1" class="dxbl-grid-edit-row dxbl-grid-edit-new-item-row-inplace"') : `data-visible-index="${i}"`}>
           <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.code)}"><button class="dxbl-btn dxbl-text-edit-btn">...</button>` : esc(l.code)}</td>
-          <td>${esc(l.name)}</td><td>${num('debit')}</td><td>${num('credit')}</td><td>${esc(l.cust || '')}</td></tr></table>`).querySelector('tr');
+          <td>${esc(l.name)}</td><td>${num('debit')}</td><td>${num('credit')}</td>
+          <td>${ed ? `<input class="dxbl-text-edit-input" value="${esc(l.cust || '')}"><button class="dxbl-btn dxbl-text-edit-btn ck">...</button>` : esc(l.cust || '')}</td></tr></table>`).querySelector('tr');
         tr.querySelectorAll('input[data-k]').forEach(x => x.onchange = () => { l[x.dataset.k] = +x.value || 0; });
         // Бодит: «Шинэ»-ээр нэмсэн мөр засварын горимд ОРООГҮЙ — нүд дээр дарахад засварын горимд орно
         if (!ed) tr.querySelectorAll('td').forEach(td => td.onclick = () => { edit = i; draw(); });
-        const lk = tr.querySelector('.dxbl-text-edit-btn');
+        const lk = tr.querySelector('.dxbl-text-edit-btn:not(.ck)');
         if (lk) lk.onclick = (e) => { e.stopPropagation(); smartLookup('Данс', [{code: '100101', name: 'Касс дахь мөнгө /төгрөг/'},
           {code: '1201', name: 'Дансны авлага'}, {code: '120101', name: 'Дансны авлага'}, {code: '340103', name: 'Авсан зээл'}],
-          false, (it) => { Object.assign(l, {code: it.code, name: it.name, cust: cust()}); draw(); }); };
+          false, (it) => { Object.assign(l, {code: it.code, name: it.name}); draw(); }); };
+        // Бодит: «Харилцагч» нүд — lookup; маягтын харилцагчаас автоматаар бөглөгддөггүй (2026-10-20)
+        const ck = tr.querySelector('.ck');
+        if (ck) ck.onclick = (e) => { e.stopPropagation(); smartLookup('Харилцагч', saleCustomers(), false, (it) => {
+          l.cust = it.code; draw(); }); };
         tb.appendChild(tr);
       });
     };
@@ -1294,6 +1299,8 @@ function cashForm(kind) {
       const ok = work.filter(l => l.code && (l.debit > 0 || l.credit > 0));
       const d = ok.reduce((a, l) => a + l.debit, 0), c = ok.reduce((a, l) => a + l.credit, 0);
       if (work.some(l => !l.code)) return warnModal('Данс сонгогдоогүй байна.');
+      if (work.some(l => String(l.code).startsWith('1201') && !l.cust))
+        return warnModal('Хадгалах боломжгүй байна Журналын мэдээлэл дээр авлага, өглөгийн данс сонгосон бол харилцагч оруулна уу !');
       if (d !== c) return warnModal('Дебет кредит тэнцэхгүй байна !');
       jlines = ok; j.remove();
     };
