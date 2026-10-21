@@ -98,12 +98,22 @@ async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True,
             await page.click("[data-ssg-lookup='1']", timeout=5000)
         except Exception as e:
             # Grid-ийн баруун захын жижиг «...» (ж: журналын «Мөнгөн гүйлгээний үзүүлэлт» багана, 2026-10-21) —
-            # Playwright «дарагдахгүй» гэж үзсэн; элемент дээр шууд (DOM) дарна
-            log(f"энгийн дарах амжилтгүй ({type(e).__name__}) — DOM-оор дарав")
-            if not await page.evaluate("() => { const b = document.querySelector('[data-ssg-lookup=\"1\"]');"
-                                       " if (!b) return false; b.scrollIntoView({block: 'center', inline: 'center'});"
-                                       " b.click(); return true; }"):
+            # Playwright «дарагдахгүй» гэж үзсэн. DOM click() хангалтгүй (DevExpress pointerdown/mousedown-оор ажилладаг —
+            # 2026-10-21 цонх нээгдээгүй) → харагдах хэсэгт гүйлгээд товчны төв рүү ЖИНХЭНЭ хулганаар дарна
+            log(f"энгийн дарах амжилтгүй ({type(e).__name__}) — хулганаар координатаар дарав")
+            box = await page.evaluate("() => { const b = document.querySelector('[data-ssg-lookup=\"1\"]'); if (!b) return null;"
+                                      " b.scrollIntoView({block: 'center', inline: 'center'}); const r = b.getBoundingClientRect();"
+                                      " return r.width > 0 ? {x: r.left + r.width / 2, y: r.top + r.height / 2} : null; }")
+            if not box:
                 raise
+            await page.mouse.click(box["x"], box["y"])
+            for _ in range(10):
+                if await dialog_count(env) > before:
+                    break
+                await asyncio.sleep(0.2)
+            else:                                   # сүүлийн арга — DOM-ийн click
+                log("хулганаар нээгдээгүй — DOM-оор дарав")
+                await page.evaluate("() => { const b = document.querySelector('[data-ssg-lookup=\"1\"]'); if (b) b.click(); }")
         for _ in range(25):
             if await dialog_count(env) > before:
                 break
