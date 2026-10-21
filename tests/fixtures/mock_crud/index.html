@@ -1271,13 +1271,16 @@ function cashForm(kind) {
         <th>Дансны код</th><th>Дансны нэр</th><th>Дебет</th><th>Кредит</th><th>Харилцагч</th></tr></thead><tbody></tbody></table></dxbl-grid>
       <div class="dxbl-fl">${lookupField('Мөнгөн гүйлгээ', 'cf', '')}</div></div>`);
     // Бодит (2026-10-21): «Мөнгөн гүйлгээ» — СОНГОСОН мөрийн мөнгөн гүйлгээний үзүүлэлт; кассын мөрөнд заавал
-    j.querySelector('.lk-cf').onclick = () => smartLookup('Мөнгөн гүйлгээ', [{code: '1100', name: 'Үндсэн үйл ажиллагааны бусад'},
-      {code: '1110', name: 'Бараа борлуулсан, үйлчилгээ үзүүлсний орлого'}], false, (it) => {
+    // Бодит жагсаалт: «2.1.3 Хөрөнгө оруулалт борлуулсны орлого» нь «1.1.1 Бараа борлуулсан…»-ээс ӨМНӨ
+    j.querySelector('.lk-cf').onclick = () => smartLookup('Мөнгөн гүйлгээний үзүүлэлт', [{code: '1.2.2', name: 'Нийгмийн даатгалын байгууллагад төлсөн'},
+      {code: '2.1.3', name: 'Хөрөнгө оруулалт борлуулсны орлого'}, {code: '1.1.1', name: 'Бараа борлуулсан, үйлчилгээ үзүүлсний орлого'}], false, (it) => {
       if (edit != null && work[edit]) work[edit].cf = it.code; j.querySelector('[name=cf]').value = it.code + ' ' + it.name; });
     const tb = j.querySelector('tbody');
     const cust = () => m.querySelector('[name=cust]').value.split(' ')[0];
     const draw = () => {
       tb.innerHTML = '';
+      // «Мөнгөн гүйлгээ» талбар СОНГОСОН мөрийн утгыг харуулна
+      const cfi = j.querySelector('[name=cf]'); if (cfi) cfi.value = (work[edit] || {}).cf || '';
       work.forEach((l, i) => {
         const ed = i === edit;
         const num = (k) => ed ? `<input class="dxbl-text-edit-input" data-k="${k}" value="${l[k]}">` : String(l[k]);
@@ -1304,7 +1307,8 @@ function cashForm(kind) {
       const ok = work.filter(l => l.code && (l.debit > 0 || l.credit > 0));
       const d = ok.reduce((a, l) => a + l.debit, 0), c = ok.reduce((a, l) => a + l.credit, 0);
       if (work.some(l => !l.code)) return warnModal('Данс сонгогдоогүй байна.');
-      if (work.some(l => String(l.code).startsWith('1001') && !l.cf))
+      // ТААМАГ (2026-10-21): кассын мөрөнд л заахад анхааруулга хэвээр байсан — мөр бүрт шаардана
+      if (work.some(l => !l.cf))
         return warnModal('Хадгалах боломжгүй байна Мөнгөн гүйлгээний үзүүлэлт сонгогдоогүй байна !');
       if (work.some(l => String(l.code).startsWith('1201') && !l.cust))
         return warnModal('Хадгалах боломжгүй байна Журналын мэдээлэл дээр авлага, өглөгийн данс сонгосон бол харилцагч оруулна уу !');

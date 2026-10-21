@@ -564,9 +564,10 @@ async def _fill_journal(env, form_level: int, spec: dict) -> None:
     env.note(f"Журнал ({button}): " + " | ".join(res["lines"]))
     # Журналын цонхны (мөрийн) талбарууд — ж: «Мөнгөн гүйлгээ» (кассын мөрийн мөнгөн гүйлгээний үзүүлэлт; «Мөнгөн
     # гүйлгээний үзүүлэлт сонгогдоогүй байна !», 2026-10-21). Талбар сонгосон мөрт хамаардаг тул эхлээд тэр мөрийг сонгоно.
-    if spec.get("fields"):
-        row = int(spec.get("fields_row", 0))
-        await env.page.evaluate(_FOCUS_ROW_JS, [ui.sel_payload(env), row])
+    rows = spec.get("fields_row", 0)
+    for row in (rows if isinstance(rows, list) else [rows]) if spec.get("fields") else []:
+        # 2026-10-21: кассын мөрөнд л заахад «…үзүүлэлт сонгогдоогүй» хэвээр — мөр бүрт (fields_row: [0, 1])
+        await env.page.evaluate(_FOCUS_ROW_JS, [ui.sel_payload(env), int(row)])
         await asyncio.sleep(0.4)
         for label, want in spec["fields"].items():
             try:
@@ -575,7 +576,7 @@ async def _fill_journal(env, form_level: int, spec: dict) -> None:
                 val = ""
             if await ui.dialog_count(env) > level:
                 await ui.close_form(env, keep=level)
-            env.note(f"Журнал: {label}=" + (val[:60] if val else f"«{want}» сонгож чадсангүй"))
+            env.note(f"Журнал мөр {int(row) + 1}: {label}=" + (val[:60] if val else f"«{want}» сонгож чадсангүй"))
     try:
         await ui.click_button(env, [str(spec.get("save") or "Хадгалах")], scope="dialog", wait_s=2)
     except StepFailed:
@@ -589,6 +590,8 @@ async def _fill_journal(env, form_level: int, spec: dict) -> None:
     if warnings:
         # popup_problems: анхааруулга нь текст (str) — Finding биш
         msg = " | ".join(str(w).replace("\n", " ")[:150] for w in warnings)
+        if env.current is not None:                      # журналын төлөвийг хаахаас өмнө (калибровк)
+            env.current.screenshot = await env.screenshot("journal-warning")
         await ui.close_form(env, keep=form_level)
         raise StepBlocked(f"Журнал хадгалахад анхааруулга: {msg}", skip_flow=True, category="validation")
     if await ui.dialog_count(env) >= level:               # журнал хадгалаад нээлттэй үлдсэн — хаана
