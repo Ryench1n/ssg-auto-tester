@@ -166,6 +166,19 @@ def plan_values(fields: list[dict], tag: str, auto_cfg: dict, uid: str = "",
     return values, (key_f["label"] if key_f else ""), picks, unresolved
 
 
+def suffix_field(fields: list[dict], name: str) -> str:
+    """Анхааруулгад нэрлэсэн талбар (ж: «Бүлэг») — шошго нь тэр үгээр ТӨГСДӨГ ганц талбар («Харьяалагдах бүлэг»).
+    Олон таарвал заавал (*) бөгөөд хоосныг; тодорхой биш бол ""."""
+    n = re.sub(r"\s+", " ", name.replace("*", "")).strip().lower()
+    if len(n) < 3:
+        return ""
+    norm = lambda s: re.sub(r"\s+", " ", (s or "").replace("*", "")).strip().lower()
+    hits = [f for f in fields if norm(f.get("label")) != n and norm(f.get("label")).endswith(" " + n)]
+    if len(hits) > 1:
+        hits = [f for f in hits if not (f.get("value") or "").strip()] or hits
+    return hits[0]["label"] if len(hits) == 1 else ""
+
+
 def want_matches(want: str, text: str) -> bool:
     """prefer-ийн утга (энгийн, «=X», «a&!b» нөхцөл) одоогийн утгатай таарах эсэх."""
     w, t = want.lstrip("=").strip().lower(), (text or "").lower()
@@ -473,7 +486,18 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
             try:
                 info = await ui.reveal_field(env, label)   # формын өөр таб дээр байж болно
             except StepFailed:
-                continue                                # талбар биш (мөрийн grid г.м.)
+                # Анхааруулгын нэр ба шошго зөрөх: «Бүлэг сонгоогүй байна!» ↔ «Харьяалагдах бүлэг» (testaccounting
+                # ~15 бүлгийн лавлах, 2026-10-21) — шошгын СҮҮЛИЙН үг(с) нь анхааруулгын нэртэй таарах ганц талбар
+                alt = suffix_field(await ui.scan_form(env, wait_s=0), label)
+                if not alt or alt in handled:
+                    continue                            # талбар биш (мөрийн grid г.м.)
+                handled.add(alt)
+                env.note(f"Анхааруулгын «{label}» → формын «{alt}» талбар")
+                label = alt
+                try:
+                    info = await ui.reveal_field(env, label)
+                except StepFailed:
+                    continue
             if info["readonly"] and not info.get("combo"):
                 continue
             cur = (info.get("value") or "").strip()
@@ -515,7 +539,11 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
             if res is not None:
                 env.run.meta["lines"] = res["lines"]
                 if res["error"]:
-                    raise StepBlocked(f"Баримтын мөр бөглөж чадсангүй: {res['error']} ({last})", skip_flow=True)
+                    # Мөрийн lookup огт хоосон (ж: HR «Шалгуурын код», «Код» — тест орчинд үзүүлэлт бүртгээгүй) — N/A
+                    empty = getattr(env, "_lookup_empty", False)
+                    raise StepBlocked(f"Баримтын мөр бөглөж чадсангүй: {res['error']}"
+                                      + (" — сонголтын жагсаалт хоосон (тест орчинд өгөгдөл алга)" if empty else "")
+                                      + f" ({last})", skip_flow=True, category="nodata" if empty else "")
                 env.note("Мөр нэмсэн: " + " | ".join(res["lines"]))
                 acted = True
         if not acted:

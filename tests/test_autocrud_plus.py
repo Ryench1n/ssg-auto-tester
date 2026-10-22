@@ -26,6 +26,7 @@ SLOW = key_of("Мастер дата", "Бүртгэл", "Удаан жагса�
 MANUAL = key_of("Мастер дата", "Бүртгэл", "Шүүлттэй жагсаалт", "/md/manual")
 GHOST = key_of("Мастер дата", "Бүртгэл", "Үл харагдах жагсаалт", "/md/ghost")
 TGRP = key_of("Мастер дата", "Бүртгэл", "Бүлгийн лавлах", "/md/tgrp")
+SGRP = key_of("Мастер дата", "Бүртгэл", "Загварын бүлэг", "/md/sgrp")
 
 
 def f(label, **kw):
@@ -101,7 +102,7 @@ def deps_run(tmp_path_factory):
     rd = tmp_path_factory.mktemp("deps")
     with CrudServer() as srv:
         srv.state.deps = True
-        pipe, cfg = make_pipe(srv, rd, [{"kind": "autocrud", "menus": [LEAVE, EMP, NOTE, PROJ, LOCK, SCHED, EBAR, CITY, SLOW, MANUAL, GHOST, TGRP]}], [])
+        pipe, cfg = make_pipe(srv, rd, [{"kind": "autocrud", "menus": [LEAVE, EMP, NOTE, PROJ, LOCK, SCHED, EBAR, CITY, SLOW, MANUAL, GHOST, TGRP, SGRP]}], [])
         data = asyncio.run(pipe.run())
     summary = generate_reports(data, cfg, rd, verify=False)
     by = {}
@@ -180,7 +181,11 @@ def test_not_applicable_checks_are_not_counted(deps_run):
     """«Хамаарахгүй» алхам (ж: өгөгдөл хадгалаагүй үеийн цэвэрлэгээ) TC болж Pass rate-ийг хиймлээр өсгөхгүй."""
     lock = deps_run["by"][LOCK]
     tcs = [t for t in deps_run["summary"]["tcs"] if t["id"].startswith(f"TC-FLOW-{lock['code']}-")]
-    assert len(tcs) == 8
+    # Өмнөх алхмаас хамаарч ажиллаагүй алхмууд тусдаа TC биш — эх алхмын TC-д «дараагийн N алхам ажиллаагүй»
+    dependent = [s for s in lock["steps"] if s["status"] == M.BLOCKED
+                 and s["message"].startswith(("Өмнөх алхам", "Шаардлагатай өгөгдөл алга"))]
+    assert dependent and len(tcs) == len(lock["steps"]) - len(dependent)
+    assert any("алхам ажиллаагүй" in t["note"] for t in tcs), [t["note"] for t in tcs]
     proj_na = [s for fl in deps_run["data"].flows for s in fl["steps"] if s.get("category") == "na"]
     na_ids = {f"TC-FLOW-{fl['code']}-{s['index']:03d}" for fl in deps_run["data"].flows for s in fl["steps"]
               if s.get("category") == "na" and not fl["meta"].get("setup")}
@@ -373,3 +378,11 @@ def test_outage_mid_run_is_recovered_not_reported_as_bugs(tmp_path):
     assert cust["meta"].get("rechecked"), steps_of(cust)              # дахин ачаалж дахин шалгасан
     assert cust["status"] == M.PASS, steps_of(cust)
     assert not any("цэс олдсонгүй" in s["message"] for f in data.flows for s in f["steps"] if s["status"] == M.FAIL)
+
+
+@e2e
+def test_warning_name_matches_field_by_last_word(deps_run):
+    """«Бүлэг сонгоогүй байна!» ↔ заавал биш «Харьяалагдах бүлэг» талбар (testaccounting ~15 цэс Blocked байсан)."""
+    fl = deps_run["by"][SGRP]
+    assert fl["status"] == M.PASS, steps_of(fl)
+    assert "Анхааруулгын «Бүлэг» → формын «Харьяалагдах бүлэг» талбар" in " ".join(fl["steps"][0]["notes"])
