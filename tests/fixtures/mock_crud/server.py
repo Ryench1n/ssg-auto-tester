@@ -110,6 +110,7 @@ def make_handler(state: CrudState):
                 extra += "{name: 'Хот', href: '/md/city', kind: 'city'},"
                 extra += "{name: 'Бүлгийн лавлах', href: '/md/tgrp', kind: 'tgrp'},"
                 extra += "{name: 'Загварын бүлэг', href: '/md/sgrp', kind: 'sgrp'},"
+                extra += "{name: 'Эвдэрдэг цэс', href: '/md/tbloss', kind: 'tbloss'},"
                 extra += "{name: 'Удаан жагсаалт', href: '/md/slow', kind: 'slow'},"
                 extra += "{name: 'Шүүлттэй жагсаалт', href: '/md/manual', kind: 'manual'},"
                 extra += "{name: 'Үл харагдах жагсаалт', href: '/md/ghost', kind: 'ghost'},"

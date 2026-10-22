@@ -60,6 +60,16 @@ def infra_broken(run) -> bool:
         any(p in (s.message or "") for p in INFRA_PATTERNS) for s in bad)
 
 
+def auto_infra_broken(run) -> bool:
+    """Автомат CRUD: орчны тасалдал. Цэс бүрийг smoke «Нэмэх + Устгах»-тай гэж бүртгэсэн тул «Нэмэх товч олдсонгүй» нь
+    апп эвдэрсний шинж (testhr 2026-10-22: «Хоолны меню»-ийн «Data is Null»-ийн дараа toolbar бүхэлдээ алга болж 68 цэс
+    дараалан «Нэмэх товч олдсонгүй»)."""
+    if infra_broken(run):
+        return True
+    first = next((s for s in run.steps if s.status in (M.FAIL, M.BLOCKED)), None)
+    return bool(first and first.index == 1 and (first.message or "").startswith("Нэмэх товч ("))
+
+
 def page_stem(name: str) -> str:
     """Хуудас/route-ийн үндэс: «OrganizationForm», «organizationlist» → «organization» (жагсаалт ба форм нэг цэс)."""
     return re.sub(r"(list|form|page|view|grid|detail|edit)+$", "", name.lower()) or name.lower()
@@ -404,7 +414,7 @@ class AutoCrudStage(Stage):
                          code=code, meta={"auto": True, "menu": menu_path(item), "menu_key": key, **(meta or {})})
         tabs0 = await _tabs(pipe)
         run = await eng.execute(pipe.page, pipe.col)
-        if infra_broken(run) and not pipe.halt.is_set():
+        if auto_infra_broken(run) and not pipe.halt.is_set():
             # Аппын bug биш — апп-ыг дахин ачаалж нэг удаа дахин шалгана
             first = next((x.message for x in run.steps if x.message), "")[:120]
             pipe.runlog.log(f"Автомат CRUD: «{menu_path(item)}» — орчны тасалдлын шинж ({first}) — дахин ачаалж "
@@ -415,7 +425,7 @@ class AutoCrudStage(Stage):
                              code=code, meta={"auto": True, "menu": menu_path(item), "menu_key": key, **(meta or {})})
             run = await eng.execute(pipe.page, pipe.col)
             run.meta["rechecked"] = True
-            if infra_broken(run):
+            if auto_infra_broken(run):
                 # Дахин ачаалсан ч мөн адил — цэсийг шалгаж чадаагүй (TC/bug үүсгэхгүй), Fail биш
                 run.meta["infra"] = True
                 run.meta["skipped"] = (f"Орчны тасалдал — апп хариу өгөхгүй/цэс олдохгүй байсан тул шалгаагүй "

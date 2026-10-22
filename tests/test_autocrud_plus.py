@@ -386,3 +386,17 @@ def test_warning_name_matches_field_by_last_word(deps_run):
     fl = deps_run["by"][SGRP]
     assert fl["status"] == M.PASS, steps_of(fl)
     assert "Анхааруулгын «Бүлэг» → формын «Харьяалагдах бүлэг» талбар" in " ".join(fl["steps"][0]["notes"])
+
+
+@e2e
+def test_lost_toolbar_after_app_error_is_recovered(tmp_path):
+    """testhr 2026-10-22: «Хоолны меню»-ийн «Data is Null»-ийн дараа бүх жагсаалтын toolbar алга болж 68 цэс
+    «Нэмэх товч олдсонгүй». Smoke Нэмэхтэй гэж бүртгэсэн цэст энэ нь орчны тасалдал — дахин ачаалж дахин шалгана."""
+    tbloss = key_of("Мастер дата", "Бүртгэл", "Эвдэрдэг цэс", "/md/tbloss")
+    with CrudServer() as srv:
+        srv.state.deps = True
+        pipe, _ = make_pipe(srv, tmp_path, [{"kind": "autocrud", "menus": [tbloss, CITY]}], [])
+        data = asyncio.run(pipe.run())
+    by = {f["meta"]["menu_key"]: f for f in data.flows if not f["meta"].get("setup")}
+    city = by[CITY]
+    assert city["meta"].get("rechecked") and city["status"] == M.PASS, steps_of(city)

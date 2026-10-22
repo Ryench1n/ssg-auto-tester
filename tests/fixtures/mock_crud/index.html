@@ -1058,6 +1058,10 @@ const MINI_DEFS = {
   sgrp: {cols: ['Нэр', 'Харьяалагдах бүлэг'], fields: [{label: 'Нэр *', name: 'name'},
          {label: 'Харьяалагдах бүлэг', name: 'parent', kind: 'lookup', src: 'custgroups'}],
          validate: (v) => !v.name ? 'Нэр оруулна уу' : !v.parent ? 'Бүлэг сонгоогүй байна!' : ''},
+  // «Эвдэрдэг цэс» (testhr «Хоолны меню», 2026-10-22): хадгалахад «Data is Null» гарч апп эвдэрнэ — үүнээс хойш
+  // жагсаалтуудын toolbar (Нэмэх/Засах/Устгах) зурагдахгүй; зөвхөн хуудсыг дахин ачаалбал сэргэнэ
+  tbloss: {cols: ['Нэр'], fields: [{label: 'Нэр *', name: 'name'}], validate: (v) => !v.name ? 'Нэр оруулна уу' : '',
+           afterCreate: () => { errorModal('Data is Null. This method or property cannot be called on Null values.'); window.__noToolbar = true; }},
   // «Удаан жагсаалт»: хадгалсан/устгасан бичлэг жагсаалтад 1.2 сек хоцорч тусна (grid дахин ачаалал)
   slow: {cols: ['Нэр'], fields: [{label: 'Нэр *', name: 'name'}], validate: (v) => !v.name ? 'Нэр оруулна уу' : '', delay: 1200},
   // «Шүүлттэй жагсаалт»: SmartApp-ын баримтын жагсаалт шиг — хадгалсан бичлэг «Шүүх» дарж байж харагдана
@@ -1430,7 +1434,7 @@ function miniView(kind) {
   };
   const inp = bar.querySelector('input');
   inp.onkeydown = (e) => { if (e.key === 'Enter') { st.q = inp.value; render(); } };
-  v.appendChild(bar);
+  if (!window.__noToolbar) v.appendChild(bar);         // эвдэрсэн апп: toolbar алга
   if (d.manual) {
     const f = $(`<button class="dxbl-btn flt">Шүүх</button>`);
     f.onclick = () => { st.rows.forEach(r => { r.fresh = false; }); render(); };
