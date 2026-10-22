@@ -138,6 +138,29 @@ def auto_skip_counts(flows: list[dict]) -> list[dict]:
     return sorted(out.values(), key=lambda g: -g["count"])
 
 
+def systemic_warnings(flows: list[dict], min_menus: int = 5) -> list[dict]:
+    """Олон цэсийг (≥ min_menus) ИЖИЛ анхааруулгаар алгассан бол — цэс бүрийн асуудал биш, системийн/орчны нэг
+    тохиргооны асуудал (testretail 2026-10-21: 60 цэс «Код тодорхойгүй байна.», формд «Код» талбаргүй).
+    [{message, count, menus}]"""
+    import re as _re
+    groups: dict[str, list[str]] = {}
+    for f in flows:
+        meta = f.get("meta") or {}
+        if not (meta.get("auto") and meta.get("skipped")) or meta.get("setup"):
+            continue
+        st = next((s for s in f.get("steps") or [] if s.get("status") == M.BLOCKED), None)
+        msg = (st or {}).get("message") or ""
+        if "хүлээж авсангүй" not in msg:
+            continue
+        core = msg.split("—", 1)[-1].replace("\n", " ")
+        core = _re.sub(r"\s*— форм тусгай.*", "", core)
+        core = _re.sub(r"^\s*(Анхааруулга|Анхаар|Хадгалах боломжгүй байна)\s*", "", core.strip()).strip()
+        if core:
+            groups.setdefault(core, []).append(meta.get("menu") or f["flow"])
+    return sorted(({"message": k, "count": len(v), "menus": v} for k, v in groups.items() if len(v) >= min_menus),
+                  key=lambda g: -g["count"])
+
+
 def leftovers(flows: list[dict]) -> list[dict]:
     """Устгаж чадаагүй тестийн өгөгдөл (crud.auto_cleanup → meta.leftover) — гараар цэвэрлэх жагсаалт."""
     return [{"menu": (f.get("meta") or {}).get("menu") or f["flow"], "items": f["meta"]["leftover"]}
@@ -203,6 +226,7 @@ def generate_reports(run: RunData, cfg: dict, run_dir: Path, verify: bool = True
         "run_tag": run.run_tag,
         "draft": run.draft,
         "auto_skips": auto_skip_counts(run.flows),
+        "systemic": systemic_warnings(run.flows),
         "leftovers": leftovers(run.flows),
         "flows": [{"flow": f["flow"], "code": f.get("code"), "status": f.get("status"), "data": f.get("data"),
                    "auto": bool((f.get("meta") or {}).get("auto")),

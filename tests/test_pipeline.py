@@ -142,7 +142,9 @@ def test_single_report_contains_flow_tcs(full):
     flow_tcs = [t for t in s["tcs"] if t["id"].startswith("TC-FLOW-")]
     assert [t["id"] for t in flow_tcs[:4]] == [f"TC-FLOW-CUST-{i:03d}" for i in range(1, 5)]
     assert all(t["module"] == "E2E" for t in flow_tcs)
-    assert s["stats"]["total"] == len(s["tcs"]) and s["stats"]["blocked"] >= 1   # flow TC GO/NO-GO-д орсон
+    assert s["stats"]["total"] == len(s["tcs"]) and s["stats"]["fail"] >= 1      # flow TC GO/NO-GO-д орсон
+    # Унасан алхмын дараах (хамааралтай) алхмууд тусдаа Blocked TC биш — эх TC-д «… алхам ажиллаагүй»
+    assert any("алхам ажиллаагүй" in t["note"] for t in flow_tcs), [t["note"] for t in flow_tcs]
     assert s["decision"] == "NO-GO"
     fb = [b for b in s["bugs"] if b["signature"].startswith("flow|broken_crud|Алдаатай бүртгэл|")]
     assert len(fb) == 1 and fb[0]["severity"] == "🟡 Major"

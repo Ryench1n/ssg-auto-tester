@@ -158,6 +158,10 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
                         + ", ".join(_menu(f).split(" / ")[-1] for f in skipped[:10])
                         + (" …" if len(skipped) > 10 else "")
                         + (f" — YAML ноорог: {run.draft}" if run.draft else ""))
+        from app.report.build import systemic_warnings
+        for g in systemic_warnings(run.flows):
+            untested.append(f"⚠ {g['count']} цэс ИЖИЛ анхааруулгаар хадгалагдсангүй: «{g['message']}» — цэс бүрийн биш, "
+                            "системийн/орчны нэг тохиргооны асуудал байх магадлалтай (хөгжүүлэгчээр шалгуулна уу)")
     left = [f for f in run.flows if (f.get("meta") or {}).get("leftover")]
     if left:
         untested.append(f"⚠ Цэвэрлэгдээгүй тестийн өгөгдөл ({len(left)} цэс) — гараар устгана уу: "

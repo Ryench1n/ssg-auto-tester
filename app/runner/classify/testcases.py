@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from app import models as M
 from app.models import ItemResult, RunData, TestCase
@@ -133,9 +134,19 @@ def build_test_cases(run: RunData, cfg: dict, executor: str, date: str) -> tuple
         if meta.get("formcheck"):
             tcs.extend(_form_tcs(fl, executor, date, auto))
             continue
+        # Өмнөх алхам амжилтгүй болсны улмаас ажиллаагүй алхмууд («Өмнөх алхам #1 … Fail», «Шаардлагатай өгөгдөл
+        # алга») — тусдаа Blocked TC биш: нэг шалтгааныг 6–7 дахин тоолж Blocked/Pass Rate-ийг хиймлээр гажуудуулдаг
+        # байсан (2026-10-21: 631 Blocked-ийн 623). Эх алхмын TC-д «дараагийн N алхам ажиллаагүй» гэж тэмдэглэнэ.
+        not_run: dict[int, int] = {}
+        for s in fl.get("steps") or []:
+            root = dependent_root(s, fl.get("steps") or [])
+            if root is not None:
+                not_run[root] = not_run.get(root, 0) + 1
         for s in fl.get("steps") or []:
             if s.get("status") == M.BLOCKED and s.get("category") == "na":
                 continue        # хамаарахгүй (ж: заавал талбаргүй формын сөрөг тест) — TC/тооцоонд орохгүй
+            if dependent_root(s, fl.get("steps") or []) is not None:
+                continue        # ажиллаагүй (өмнөх алхмаас хамаарсан) — эх алхмын TC-д тоологдоно
             args = json.dumps(s.get("args") or {}, ensure_ascii=False)
             pre = f"Нэвтэрсэн (гараар); run_tag={fl.get('run_tag', '')}"
             if s.get("requires"):
@@ -144,6 +155,8 @@ def build_test_cases(run: RunData, cfg: dict, executor: str, date: str) -> tuple
             if s.get("retried"):
                 note.append("Session тасарсны дараа дахин ажилласан")
             note += s.get("notes") or []
+            if not_run.get(s["index"]):
+                note.append(f"Энэ алхмын улмаас дараагийн {not_run[s['index']]} алхам ажиллаагүй")
             tcs.append(TestCase(
                 tc_id=f"TC-FLOW-{code}-{s['index']:03d}",
                 req_ref=f"E2E-{code}",
@@ -194,6 +207,24 @@ def _form_tcs(fl: dict, executor: str, date: str, auto: str) -> list[TestCase]:
             screenshot=s.get("screenshot") or "",
         ))
     return out
+
+
+def dependent_root(step: dict, steps: list[dict]) -> int | None:
+    """Алхам өмнөх алхмаас хамаарч ажиллаагүй бол эх (анх амжилтгүй болсон) алхмын дугаар, үгүй бол None."""
+    if step.get("status") != M.BLOCKED:
+        return None
+    msg = step.get("message") or ""
+    m = re.match(r"Өмнөх алхам #(\d+)", msg)
+    if m:
+        idx = int(m.group(1))
+        prev = next((s for s in steps if s.get("index") == idx), None)
+        # Эх алхам мөн хамааралтай бол түүний эх рүү (гинжин)
+        return (dependent_root(prev, steps) or idx) if prev is not None else idx
+    if msg.startswith("Шаардлагатай өгөгдөл алга"):
+        first = next((s for s in steps if s.get("status") in (M.FAIL, M.BLOCKED)
+                      and not (s.get("message") or "").startswith(("Өмнөх алхам", "Шаардлагатай өгөгдөл алга"))), None)
+        return first.get("index") if first is not None else None
+    return None
 
 
 def is_form_flow(fl: dict) -> bool:

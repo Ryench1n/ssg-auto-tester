@@ -814,10 +814,14 @@ function showResult(s, status, error) {
   $('resLeft').classList.toggle('hidden', !left.length);
   $('resLeft').innerHTML = left.length ? '<b>⚠ Цэвэрлэгдээгүй тестийн өгөгдөл — гараар устгана уу</b><ul style="margin:6px 0 0 18px; padding:0">'
     + left.map(l => `<li>${esc(l.menu)}: ${esc(l.items.join('; '))}</li>`).join('') + '</ul>' : '';
+  // Олон цэст давтагдсан ижил анхааруулга — нэг системийн/орчны тохиргооны асуудал (цэс бүрийн биш)
+  const sysw = s.systemic || [];
   const skips = s.auto_skips || [];
   $('resSkips').classList.toggle('hidden', !skips.length);
   $('resSkips').innerHTML = skips.length ? 'Автомат CRUD шалгаж чадаагүй: '
     + skips.map(g => `<span title="${esc(g.menus.join(', '))}">${esc(g.label)} — <b>${g.count}</b></span>`).join(' · ') : '';
+  if (sysw.length) $('resSkips').innerHTML += '<div class="warn" style="margin-top:6px">⚠ Олон цэст ижил анхааруулга (системийн/орчны тохиргоо — '
+    + 'хөгжүүлэгчээр шалгуулна уу): ' + sysw.map(g => `<span title="${esc(g.menus.join(', '))}">«${esc(g.message)}» — <b>${g.count} цэс</b></span>`).join(' · ') + '</div>';
   const st = s.stats, bc = s.bug_counts;
   $('resKpis').innerHTML = [['Pass Rate', st.pass_rate + '%'], ['Нийт TC', st.total], ['Pass', st.pass, 'pass'], ['Fail', st.fail, 'fail'],
     ['Blocked', st.blocked, 'blocked'], ['🔴 Critical', bc.critical], ['🟡 Major', bc.major], ['🟢 Minor', bc.minor]]

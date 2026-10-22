@@ -146,3 +146,13 @@ def test_short_e2e_only_run_has_no_pending_session_tc(cfg):
     run.smoke_ran = True                                  # smoke-той богино run — Pending хэвээр (бүрэн бус)
     tcs, _ = build_test_cases(run, cfg, "SSG", "2026-10-19")
     assert [t.result for t in tcs if t.tc_id == "TC-LOGIN-002"] == ["Pending"]
+
+
+def test_dependent_steps_are_not_separate_blocked_tcs():
+    """«Өмнөх алхам #1 … Fail» / «Шаардлагатай өгөгдөл алга» — тусдаа Blocked TC биш; эх алхмын TC-д тоологдоно."""
+    from app.runner.classify.testcases import dependent_root
+    st = lambda i, status, msg="": {"index": i, "status": status, "message": msg}
+    steps = [st(1, M.FAIL, "Хадгалахад: Системийн алдаа"), st(2, M.BLOCKED, "Өмнөх алхам #1 (Бүртгэх) Fail"),
+             st(3, M.BLOCKED, "Өмнөх алхам #2 (Хайх) Blocked"), st(5, M.BLOCKED, "Шаардлагатай өгөгдөл алга: a01_rec"),
+             st(7, M.BLOCKED, "Тестийн өгөгдөл үлдсэн (гараар устгана уу)"), st(8, M.PASS)]
+    assert [dependent_root(s, steps) for s in steps] == [None, 1, 1, 1, None, None]
