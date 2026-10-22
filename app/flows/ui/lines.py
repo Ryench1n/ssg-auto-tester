@@ -127,24 +127,34 @@ async def _type_cell(env: "FlowEngine", i: int, value: str) -> bool:
     loc = env.page.locator(f"[data-ssg-lrow='1'] [data-ssg-lcell='{i}'] input").first
     level = await dialog_count(env)
     try:
-        if await loc.count():
-            await loc.fill(value)
-            await loc.press("Enter")
-        else:
-            await env.page.keyboard.press("Control+A")
-            await env.page.keyboard.type(value)
-            await env.page.keyboard.press("Enter")
+        await loc.fill(value, timeout=3000)
+        await loc.press("Enter", timeout=3000)
     except Exception:
-        return False
+        # Playwright input-ийг «бөглөгдөхгүй» гэж үзсэн (testaccounting журналын үзүүлэлтийн нүд — fill 30 сек
+        # гацсан, 2026-10-21) — input-д DOM-оор фокус өгөөд жинхэнэ гараар бичнэ
+        try:
+            await env.page.evaluate("(i) => { const td = document.querySelector(`[data-ssg-lrow=\"1\"] [data-ssg-lcell=\"${i}\"]`);"
+                                    " const inp = td && td.querySelector('input'); if (inp) { inp.focus(); inp.select && inp.select(); } }", i)
+            await env.page.keyboard.press("Control+A")
+            await env.page.keyboard.type(value, delay=30)
+            await env.page.keyboard.press("Enter")
+        except Exception:
+            return False
     await asyncio.sleep(0.6)
     if await dialog_count(env) > level:            # хайлтын цонх нээгдсэн бол хадгалахгүй хаана
         await close_form(env, keep=level)
+    # Бичсэн утга үнэхээр тогтсон эсэх (readonly input-д бичихэд юу ч өөрчлөгдөхгүй ч «бичсэн» гэж худал мэдээлж
+    # байсан) — нүдний текст / input-ийн утга кодыг агуулах ёстой
     try:
+        ok = await env.page.evaluate("([i, v]) => { const td = document.querySelector(`[data-ssg-lrow=\"1\"] [data-ssg-lcell=\"${i}\"]`)"
+                                     " || document.querySelector(`[data-ssg-lcell=\"${i}\"]`); if (!td) return false;"
+                                     " const inp = td.querySelector('input');"
+                                     " return ((inp && inp.value) || td.innerText || '').includes(v); }", [i, value])
         await env.page.evaluate("() => document.activeElement && document.activeElement.blur()")
     except Exception:
-        pass
+        ok = False
     await asyncio.sleep(0.3)
-    return True
+    return bool(ok)
 
 
 def _hnorm(s: str) -> str:

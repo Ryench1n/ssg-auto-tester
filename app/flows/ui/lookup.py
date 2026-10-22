@@ -78,6 +78,7 @@ async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True,
     Давхар дарахыг зөвхөн «Сонгох» товчгүй үед хэрэглэнэ (SmartApp-д мөрийн сум нь бичлэг НЭЭДЭГ)."""
     page = env.page
     seq = getattr(env, "_lk_seq", 0) + 1
+    env._lookup_empty = False          # сүүлийн lookup хоосон байсан эсэх (тест орчинд өгөгдөл алга — N/A ангилал)
     env._lk_seq = seq
     trace: list[str] = []
 
@@ -119,9 +120,26 @@ async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True,
                 break
             await asyncio.sleep(0.2)
         else:
-            log(f"цонх нээгдсэнгүй (dialogs={before})")
-            await shot("no-dialog")
-            return ""
+            # Дарахаар нээгдээгүй — DevExpress button-edit-ийг гараар нээх: input-д фокус өгөөд F4 / Alt+↓
+            # (testaccounting журналын «Мөнгөн гүйлгээний үзүүлэлт» нүд — ямар ч даралтаар нээгдээгүй, 2026-10-21)
+            focused = await page.evaluate("() => { const b = document.querySelector('[data-ssg-lookup=\"1\"]'); if (!b) return false;"
+                                          " const box = b.closest('.dxbl-text-edit, td, .dxbl-fl-ctrl') || b.parentElement;"
+                                          " const inp = box && box.querySelector('input'); if (!inp) return false; inp.focus(); return true; }")
+            opened = False
+            for key in (["F4", "Alt+ArrowDown"] if focused else []):
+                await page.keyboard.press(key)
+                for _ in range(8):
+                    if await dialog_count(env) > before:
+                        opened = True
+                        break
+                    await asyncio.sleep(0.2)
+                if opened:
+                    log(f"даралтаар нээгдээгүй — «{key}» товчлуураар нээв")
+                    break
+            if not opened:
+                log(f"цонх нээгдсэнгүй (dialogs={before}; дарах, хулгана, DOM, F4, Alt+↓ бүгд)")
+                await shot("no-dialog")
+                return ""
         log(f"цонх нээгдлээ (dialogs {before}→{await dialog_count(env)})")
         row = None
         searched = False
@@ -157,6 +175,7 @@ async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True,
                 await close_form(env, keep=before)
                 raise StepFailed(f"{what or 'Сонголтын'} (lookup) цонх нээхэд: {errors[0].text}", errors)
             log(f"мөр олдсонгүй ({'хоосон' if row == '' else 'ачаалагдаагүй/таниагүй'})")
+            env._lookup_empty = row == "" and not want
             if want:
                 # Калибровк: хайлтыг цэвэрлээд lookup-д БОДИТ байгаа мөрүүдийг тайланд (ж: кассын орлогын «Данс»-д
                 # авлагын данс огт гардаггүй — 2026-10-19)

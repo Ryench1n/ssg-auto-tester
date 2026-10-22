@@ -1053,6 +1053,11 @@ const MINI_DEFS = {
   // бодит (Бүх биш) бүлгийг сонгосны дараа «Нэмэх»; эс бөгөөс «Харьяалагдах бүлэг сонгоогүй байна!»
   tgrp: {cols: ['Нэр', 'Бүлэг'], fields: [{label: 'Нэр *', name: 'name'}], validate: (v) => !v.name ? 'Нэр оруулна уу' : '',
          tree: ['Бүх бүлэг', 'Санхүү', 'Борлуулалт'], needGroup: true, rowVals: (r) => [r.name, r.grp || '']},
+  // «Загварын бүлэг» (testaccounting «Гүйлгээний загварын бүлэг»): заавал БИШ «Харьяалагдах бүлэг» lookup; хоосон бол
+  // анхааруулга талбарын нэрийг богиносгож «Бүлэг сонгоогүй байна!» гэдэг
+  sgrp: {cols: ['Нэр', 'Харьяалагдах бүлэг'], fields: [{label: 'Нэр *', name: 'name'},
+         {label: 'Харьяалагдах бүлэг', name: 'parent', kind: 'lookup', src: 'custgroups'}],
+         validate: (v) => !v.name ? 'Нэр оруулна уу' : !v.parent ? 'Бүлэг сонгоогүй байна!' : ''},
   // «Удаан жагсаалт»: хадгалсан/устгасан бичлэг жагсаалтад 1.2 сек хоцорч тусна (grid дахин ачаалал)
   slow: {cols: ['Нэр'], fields: [{label: 'Нэр *', name: 'name'}], validate: (v) => !v.name ? 'Нэр оруулна уу' : '', delay: 1200},
   // «Шүүлттэй жагсаалт»: SmartApp-ын баримтын жагсаалт шиг — хадгалсан бичлэг «Шүүх» дарж байж харагдана
@@ -1299,8 +1304,9 @@ function cashForm(kind) {
         // Бодит (2026-10-21): баруун захын «...» Playwright-аар дарагдахгүй (Page.click timeout) — дээр нь давхарга
         // Бодит (2026-10-21): энэ «...» ямар ч аргаар (Playwright, хулгана, DOM) цонх нээгээгүй — кодыг бичээд Enter
         const rin = tr.querySelector('.rcf-in');
-        if (rin) rin.onkeydown = (e) => { if (e.key !== 'Enter') return;
-          const it = cfItems.find(x => x.code === rin.value.trim()); if (it) { l.rcf = it.code; } };
+        // Таамаг: DevExpress button-edit — input readonly, «...»-г дарахаар биш F4-өөр нээгдэнэ
+        if (rin) { rin.readOnly = true; rin.onkeydown = (e) => { if (e.key !== 'F4') return; e.preventDefault();
+          smartLookup('Мөнгөн гүйлгээний үзүүлэлт', cfItems, false, (it) => { l.rcf = it.code; draw(); }); }; }
         tr.querySelectorAll('input[data-k]').forEach(x => x.onchange = () => { l[x.dataset.k] = +x.value || 0; });
         // Бодит: «Шинэ»-ээр нэмсэн мөр засварын горимд ОРООГҮЙ — нүд дээр дарахад засварын горимд орно
         if (!ed) tr.querySelectorAll('td').forEach(td => td.onclick = () => { edit = i; draw(); });
