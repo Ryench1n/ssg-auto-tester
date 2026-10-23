@@ -120,7 +120,127 @@ flows:
         always: true
         with: {menu: "Мастер дата|Ерөнхий дэвтэр|Данс|accountlist", data: c02}
 
-  # ---------------------------------------------------------------- Үе 2: Order-to-Cash (Борлуулалт → Касс)
+  # ---------------------------------------------------------------- Үе 2-A: Борлуулалт → Авлага (бодит апп дээр батлагдсан)
+  # Тест харилцагч + үйлчилгээ → зээлээр борлуулалт → харилцагчийн авлага +1000, ГД-д тэнцвэртэй бичигдсэн (Дт 120101 1000 /
+  # Кт 510101 892.85 + НӨАТ 89.29 + НХАТ 17.86) → устгахад Δ = 0. Кассын орлогын хэсэг — «P2K» (журналын мөнгөн гүйлгээний
+  # үзүүлэлтийн нүдийг хэрэгсэл бөглөж чадахгүй байна, 2026-10-23: дарах/хулгана/DOM/F4/Alt+↓/бичих бүгд бүтэлгүй).
+  "P2: Борлуулалт → Авлага":
+    type: e2e
+    code: P2
+    description: "Тест харилцагч + үйлчилгээ → зээлээр борлуулалт → авлага +1000, ГД-д тэнцвэртэй → устгахад Δ = 0"
+    steps:
+      - uses: crud.auto_create
+        name: "Тест харилцагч үүсгэх"
+        with: {menu: "Мастер дата|Өглөг авлага|Харилцагч|customerlist", save_as: k11_rec, field_as: k11_field, try_as: k11_try,
+               values: {"Борлуулалтын харилцагч эсэх": "true"}}
+      - uses: crud.auto_create
+        name: "Тест үйлчилгээ (бараа) үүсгэх — 1000₮"
+        with: {menu: "Мастер дата|Бараа материал|Барааны жагсаалт|itemlist", save_as: i12_rec, field_as: i12_field, try_as: i12_try,
+               prefer: {"Төрөл": "Ажил үйлчилгээ", "Данс": "1501"},
+               values: {"Худалдах үнэ": "1000", "Борлуулах бараа эсэх": "true"}}
+      - &p2ar
+        uses: report.read
+        name: "Харилцагчийн авлага — эхний төлөв"
+        with: &p2arw
+          menu: "Мастер дата|Өглөг авлага|Харилцагч|customerlist"
+          search: true
+          rows:
+            ar: {match: "{run_tag}11", column: "Авлагын үлдэгдэл"}
+          save_as: a0
+      - &p2gl
+        uses: report.read
+        name: "ГД-ийн бичилт (борлуулалт) — эхний төлөв"
+        with: &p2glw
+          menu: "Ерөнхий дэвтэр|Жагсаалт|Гүйлгээний жагсаалт|generalledger/journallist"
+          search: true
+          rows:
+            sale_dt: {match: "{run_tag} S14", column: "Дебет", agg: sum}
+            sale_net: {match: "{run_tag} S14", column: "Дебет", minus: "Кредит", agg: sum}
+          save_as: g0
+      - &p2sl
+        uses: report.read
+        name: "Борлуулалтын дүн — эхний төлөв"
+        with: &p2slw
+          menu: "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist"
+          search: true
+          rows:
+            total: {match: "{run_tag} S14", column: "Нийт дүн", agg: sum}
+          save_as: s0
+      - uses: crud.auto_create
+        name: "Борлуулалт: тест харилцагчид зээлээр, 1 × 1000₮"
+        with:
+          menu: "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist"
+          save_as: s14_rec
+          field_as: s14_field
+          try_as: s14_try
+          prefer: {"Харилцагч": "{run_tag}11", "Данс": "авлага&!валют", "Байршил": "Агуулах"}
+          lines: {item: "{run_tag}12", cells: {"Тоо хэмжээ": "1", "Нэгж үнэ": "1000"}}
+      - uses: crud.search
+        name: "Борлуулалт жагсаалтад харагдах"
+        with: {menu: "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist", text: "{s14_rec}"}
+      - <<: *p2sl
+        name: "Борлуулалтын дүн — бүртгэсний дараа"
+        with: {<<: *p2slw, save_as: s1}
+      - uses: assert.delta
+        name: "Борлуулалтын нийт дүн = тоо × үнэ (1000)"
+        with: {before: s0, after: s1, expect: {total: 1000}}
+      - <<: *p2ar
+        name: "Харилцагчийн авлага — борлуулалтын дараа"
+        with: {<<: *p2arw, save_as: a1}
+      - uses: assert.delta
+        name: "Борлуулалт: харилцагчийн авлага +1000"
+        with: {before: a0, after: a1, expect: {ar: 1000}}
+      - <<: *p2gl
+        name: "ГД-ийн бичилт — борлуулалтын дараа"
+        with: {<<: *p2glw, save_as: g1, show_rows: true}
+      - uses: assert.delta
+        name: "ГД: борлуулалт 1000₮-өөр тэнцвэртэй бичигдсэн"
+        with: {before: g0, after: g1, expect: {sale_dt: 1000, sale_net: 0}}
+      # ---- цэвэрлэгээ (always)
+      - uses: crud.delete
+        name: "Цэвэрлэх: борлуулалт устгах"
+        always: true
+        with: {menu: "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist", find: "{s14_rec}"}
+      - <<: *p2ar
+        name: "Харилцагчийн авлага — устгасны дараа"
+        always: true
+        with: {<<: *p2arw, save_as: a3}
+      - <<: *p2gl
+        name: "ГД-ийн бичилт — устгасны дараа"
+        always: true
+        with: {<<: *p2glw, save_as: g2}
+      - uses: assert.delta
+        name: "Цэвэрлэгээ: авлага анхны төлөвтөө (Δ = 0)"
+        always: true
+        with: {before: a0, after: a3, expect: {ar: 0}}
+      - uses: assert.delta
+        name: "Цэвэрлэгээ: ГД-ийн бичилт буцаагдсан (Δ = 0)"
+        always: true
+        with: {before: g0, after: g2, expect: {sale_dt: 0, sale_net: 0}}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: борлуулалтын үлдэгдэл"
+        always: true
+        with: {menu: "Борлуулалт|Жагсаалт|Борлуулалтын жагсаалт|sale/saledocumentlist", data: s14}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: тест үйлчилгээ"
+        always: true
+        with: {menu: "Мастер дата|Бараа материал|Барааны жагсаалт|itemlist", data: i12}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: тест харилцагч"
+        always: true
+        with: {menu: "Мастер дата|Өглөг авлага|Харилцагч|customerlist", data: k11}
+      # Мэдэгдэж буй bug: жагсаалт өгөгдөл ачаалахад унадаг ('CustomerGroup' not found, 2026-10-19)
+      - uses: report.read
+        name: "Харилцагчийн үлдэгдлийн жагсаалт /дансаар/ ачаалагдах"
+        always: true
+        with:
+          menu: "Өглөг & Авлага|Жагсаалт|Харилцагчийн үлдэгдлийн жагсаалт /дансаар/|recpay/customerbalancelist"
+          search: true
+          rows:
+            ar: {match: "{run_tag}11", column: "Эцсийн үлдэгдэл", agg: sum}
+          save_as: cb
+
+  # ---------------------------------------------------------------- Үе 2-B (P2K): Order-to-Cash (Борлуулалт → Касс)
   # Бие даасан (P1 шиг): тест өөрийн харилцагч ({run_tag}11), үйлчилгээ ({run_tag}12, 1000₮)-г үүсгэж, тэр харилцагчид
   # зээлээр борлуулаад кассын орлогоор төлүүлнэ. Oracle:
   #   - Харилцагчийн «Авлагын үлдэгдэл» (Харилцагч жагсаалт): борлуулалтын дараа +1000, төлбөрийн дараа 0
@@ -130,9 +250,11 @@ flows:
   #   - ГД-ийн бичилт: баримт бүр ГД-д тэнцвэртэй (Σ Дебет = Σ Кредит = 1000) бичигдсэн
   # Цэвэрлэгээ (always): кассын орлого → борлуулалт → (Δ = 0) → бараа → харилцагч. Бодит харилцагч/бараанд хүрэхгүй:
   # run_tag-тай сонголт олдохгүй бол бодит бичлэгээр ОРЛУУЛАХГҮЙ (Blocked).
-  "P2: Борлуулалт → Кассын орлого → Авлага":
+  # ⚠ 2026-10-23: кассын орлогын журналын «Мөнгөн гүйлгээний үзүүлэлт» нүдийг хэрэгсэл бөглөж чадахгүй (бүх арга
+  # бүтэлгүй) — нэг удаа гараар бичих (🎥) эсвэл хөгжүүлэгчийн тайлбар шаардлагатай. Борлуулалтын хэсэг — «P2».
+  "P2K: Борлуулалт → Кассын орлого → Авлага":
     type: e2e
-    code: P2
+    code: P2K
     description: "Тест харилцагч + үйлчилгээ → зээлээр борлуулалт (авлага +1000, ГД-д бичигдсэн) → кассын орлого (авлага 0) → цуцлахад Δ = 0"
     steps:
       - uses: crud.auto_create

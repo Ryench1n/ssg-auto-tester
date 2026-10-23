@@ -281,7 +281,7 @@ def test_phase2_order_to_cash_site_scenario_is_self_contained(tmp_path):
     import json as _json
     from app.flows.engine import load_flow
     site = load_config("https://testaccounting.smartapp.mn/")
-    spec = load_flow(site, "P2: Борлуулалт → Кассын орлого → Авлага")
+    spec = load_flow(site, "P2K: Борлуулалт → Кассын орлого → Авлага")
     text = _json.dumps(spec, ensure_ascii=False)
     for real, mock in P2_KEYS.items():
         text = text.replace(real, mock)
@@ -386,3 +386,30 @@ def test_p2_diagnostic_flow_is_read_only_and_shows_rows(tmp_path):
     assert fl["status"] == M.PASS, [(s["name"], s["message"][:150]) for s in fl["steps"]]
     assert all(not s.get("findings") for s in fl["steps"])
     assert srv.state.untagged_touched == 0
+
+
+
+@e2e
+def test_phase2_sale_to_receivable_flow_is_self_contained(tmp_path):
+    """«P2: Борлуулалт → Авлага» (бодит апп дээр батлагдсан хэсэг): авлага +1000, ГД тэнцвэртэй, устгахад Δ = 0.
+    Зөвхөн мэдэгдэж буй bug-ийн шалгалт (харилцагчийн үлдэгдлийн жагсаалт унадаг) Fail."""
+    import json as _json
+    from app.flows.engine import load_flow
+    spec = load_flow(load_config("https://testaccounting.smartapp.mn/"), "P2: Борлуулалт → Авлага")
+    text = _json.dumps(spec, ensure_ascii=False)
+    for real, mock in P2_KEYS.items():
+        text = text.replace(real, mock)
+    spec = _json.loads(text)
+    with CrudServer() as srv:
+        srv.state.e2e = True
+        cfg = load_config(srv.url, {**FAST, "flows": {"P2": spec}})
+        pipe = PipelineRunner("p2a", srv.url, cfg, RunOptions(project="T"), tmp_path,
+                              steps=[{"kind": "crud", "flow": "P2"}], headless=True,
+                              on_waiting_login=HumanLogin("admin", PASSWORD))
+        data = asyncio.run(pipe.run())
+    fl = data.flows[0]
+    bad = [(s["index"], s["name"], s["status"], s["message"][:150]) for s in fl["steps"] if s["status"] != M.PASS]
+    assert [b[1] for b in bad] == ["Харилцагчийн үлдэгдлийн жагсаалт /дансаар/ ачаалагдах"], bad
+    d = fl["data"]
+    assert d["a1"] == {"ar": 1000.0} and d["a3"] == d["a0"] == {"ar": 0.0}
+    assert d["g1"] == {"sale_dt": 1000.0, "sale_net": 0.0} and d["g2"] == d["g0"]
