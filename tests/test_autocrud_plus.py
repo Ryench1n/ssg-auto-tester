@@ -400,3 +400,20 @@ def test_lost_toolbar_after_app_error_is_recovered(tmp_path):
     by = {f["meta"]["menu_key"]: f for f in data.flows if not f["meta"].get("setup")}
     city = by[CITY]
     assert city["meta"].get("rechecked") and city["status"] == M.PASS, steps_of(city)
+
+
+@e2e
+def test_leftover_not_in_own_list_is_swept_from_sibling_list(tmp_path):
+    """testaccounting 2026-10-23: «ДҮ - ээс орлого» баримт өөрийн жагсаалтад харагдахгүй тул run бүр 5–7 тестийн бичлэг
+    үлддэг байсан. Ижил модулийн, ижил үгээр эхэлсэн өөр жагсаалтаас олж устгана."""
+    dua = key_of("Мастер дата", "Бүртгэл", "ДҮ баримтын жагсаалт", "/md/dua")
+    dub = key_of("Мастер дата", "Бүртгэл", "ДҮ орлогын жагсаалт", "/md/dub")
+    with CrudServer() as srv:
+        srv.state.deps = True
+        pipe, cfg = make_pipe(srv, tmp_path, [{"kind": "autocrud", "menus": [dub, dua]}], [])
+        data = asyncio.run(pipe.run())
+    by = {f["meta"]["menu_key"]: f for f in data.flows if not f["meta"].get("setup")}
+    b = by[dub]
+    assert b["meta"].get("swept") and not b["meta"].get("leftover"), b["meta"]
+    s = generate_reports(data, cfg, tmp_path, verify=False)
+    assert not s["leftovers"], s["leftovers"]

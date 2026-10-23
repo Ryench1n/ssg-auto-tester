@@ -389,6 +389,8 @@ class AutoCrudStage(Stage):
                                                         M.BLOCKED, f"{len(rest)} цэс хойшлогдов"))
                 break
         runs = await self._retry_with_masters(pipe, keys, runs)
+        if not pipe.halt.is_set():
+            await self._sweep_leftovers(pipe, keys)
         tested = [r for r in runs if not r.meta.get("skipped")]
         n_pass = sum(1 for r in tested if r.status == M.PASS)
         msg = (f"{len(keys)} цэс: шалгасан {len(tested)} (Pass {n_pass}), "
@@ -449,6 +451,53 @@ class AutoCrudStage(Stage):
                                                 + (" (мастер)" if (meta or {}).get("setup") else ""), label,
                                                 f"run_tag {run.run_tag}"))
         return run
+
+    async def _sweep_leftovers(self, pipe: "PipelineRunner", keys: list[str]) -> None:
+        """Хадгалсан ч өөрийн жагсаалтаас олдоогүй тестийн бичлэгийг ижил модулийн, нэр нь ижил үгээр эхэлсэн бусад
+        жагсаалтаас (≤ 6) хайж устгана. testaccounting 2026-10-23: «ДҮ - ээс орлого» төрлийн баримт «ДҮ-ийн орлогын
+        баримтын жагсаалт»-д харагдаагүй ч «ДҮ-ийн баримтын жагсаалт»-д харагддаг — run бүр 5–7 бичлэг үлддэг байсан.
+        Зөвхөн энэ run-ы давтагдашгүй (run_tag-тай) утгатай яг тэнцүү мөрийг устгана — бодит өгөгдөлд хүрэхгүй."""
+        left = [f for f in pipe.data.flows if (f.get("meta") or {}).get("auto") and (f.get("meta") or {}).get("leftover_values")]
+        if not left:
+            return
+        pool = list(dict.fromkeys(list(keys) + [c["key"] for c in crud_candidates(pipe.data.results or [])]))
+        first_word = lambda k: (menu_from_key(k).name.split() or [""])[0].lower()
+        n = 0
+        for f in left:
+            own = f["meta"]["menu_key"]
+            module = own.split("|")[0]
+            others = [k for k in pool if k != own and k.split("|")[0] == module
+                      and first_word(k) == first_word(own)][:6]
+            for text in list(f["meta"]["leftover_values"]):
+                for k in others:
+                    if pipe.halt.is_set():
+                        return
+                    n += 1
+                    data = f"sw{n}"
+                    pipe.flow_ctx.data[f"{data}_try"] = text        # _rec биш — олдохгүй бол «үлдсэн» гэж тэмдэглэхгүй
+                    spec = {"steps": [{"uses": "crud.auto_cleanup", "name": "Үлдсэн тестийн өгөгдлийг хайж устгах",
+                                       "always": True, "with": {"menu": menu_path(menu_from_key(k)), "data": data}}]}
+                    run = await self._flow(pipe, k, pipe.next_auto_code("S"), spec,
+                                           f"cleanup: {menu_path(menu_from_key(k))}", {"setup": True, "sweep": True})
+                    if run.meta.get("cleaned"):
+                        tag = pipe.flow_ctx.run_tag
+                        f["meta"]["leftover_values"].remove(text)
+                        f["meta"]["leftover"] = [x for x in f["meta"].get("leftover") or []
+                                                 if not x.startswith(text.replace(tag, "{run_tag}"))]
+                        f["meta"].setdefault("swept", []).append(f"{text.replace(tag, '{run_tag}')} → "
+                                                                 f"«{menu_path(menu_from_key(k))}»-ээс устгав")
+                        pipe.runlog.log(f"Автомат CRUD: үлдсэн «{text}»-ийг «{menu_path(menu_from_key(k))}»-ээс олж устгав")
+                        break
+            if not f["meta"].get("leftover"):
+                f["meta"].pop("leftover", None)
+                if f["meta"].get("swept"):
+                    # Цэвэрлэгээний алхам (Blocked «үлдсэн») — өөр жагсаалтаас олж устгасан тул Pass + тэмдэглэл
+                    for st in f.get("steps") or []:
+                        if st.get("uses") == "crud.auto_cleanup" and (st.get("message") or "").startswith("Тестийн өгөгдөл үлдсэн"):
+                            st["status"], st["message"] = M.PASS, ""
+                            st.setdefault("notes", []).extend(
+                                ["Өөрийн жагсаалтаас олдоогүй — ижил модулийн өөр жагсаалтаас олж устгав: "
+                                 + "; ".join(f["meta"]["swept"])])
 
     async def _retry_with_masters(self, pipe: "PipelineRunner", keys: list[str], runs: list) -> list:
         """Тест орчинд хоосон lookup («Ажилтан») улмаас алгассан цэсүүд: тохирох мастер цэсээр бичлэг үүсгэж

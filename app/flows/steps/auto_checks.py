@@ -147,6 +147,8 @@ async def auto_cleanup(env, args: dict) -> dict:
                   else "Тестийн өгөгдлийг устгав: ") + ", ".join(cleaned))
     if left:
         env.run.meta["leftover"] = left
+        # Бодит утга — автомат CRUD-ийн төгсгөлд ижил модулийн бусад жагсаалтаас хайж устгана (AutoCrudStage._sweep)
+        env.run.meta["leftover_values"] = [t for t in texts if t == saved and t not in cleaned]
         raise StepBlocked("Тестийн өгөгдөл үлдсэн (гараар устгана уу): " + "; ".join(left))
     if not cleaned:
         env.note("Тестийн өгөгдөл үлдээгүй")
