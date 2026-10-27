@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -22,10 +23,21 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init()
 
-    def _conn(self) -> sqlite3.Connection:
-        c = sqlite3.connect(self.path)
+    @contextmanager
+    def _conn(self):
+        """Транзакц commit/rollback хийгээд холболтыг ХААНА (олон зэрэг run-д файл түгжээ, handle хуримтлахгүй).
+        WAL + busy timeout — өөр процесс (тайлан дахин үүсгэх скрипт г.м.) зэрэг бичихэд «database is locked» болохгүй."""
+        c = sqlite3.connect(self.path, timeout=30)
         c.row_factory = sqlite3.Row
-        return c
+        try:
+            c.execute("PRAGMA busy_timeout=30000")
+            if not getattr(self, "_wal", False):
+                c.execute("PRAGMA journal_mode=WAL")
+                self._wal = True
+            with c:
+                yield c
+        finally:
+            c.close()
 
     def _init(self) -> None:
         with _lock, self._conn() as c:
