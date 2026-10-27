@@ -45,7 +45,7 @@ def make_run(n: int = 20, fails: dict | None = None) -> RunData:
         if fails and i in fails:
             r.findings = list(fails[i])
             if any(f.kind in (M.TIMEOUT, M.LOADING_STUCK) for f in r.findings):
-                r.status, r.blocked_reason = M.BLOCKED, "Timeout"
+                r.status, r.blocked_reason = M.BLOCKED, "\"Loading…\" 60 сек-ээс удаан гацсан"
             else:
                 r.status = M.FAIL
             r.confirmation = "Баталгаажсан (2/2)"

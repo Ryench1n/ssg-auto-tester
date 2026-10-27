@@ -76,13 +76,32 @@ def load_run(raw_path: Path) -> M.RunData:
     for r in results:
         if r.status == M.FAIL and smoke_status(r, {}) == M.PASS:
             r.status = M.PASS
+    # Хуучин raw.json: Blocked-ийг шалтгаанаар нь дахин ангилна — апп талын нотолгоотой саад л Blocked,
+    # хэрэгсэл/тохиргоо/өгөгдлийн шалтгаантай нь «Шалгагдаагүй» (classify/cause.py)
+    from app.runner.classify.cause import status_for
+    from app.runner.smoke import classify_item
+    for r in results:
+        if not r.cause:
+            classify_item(r)
+    for f in d.get("flows") or []:
+        changed = False
+        for s in f.get("steps") or []:
+            if s.get("status") == M.BLOCKED and not s.get("cause"):
+                s["status"], s["cause"] = status_for(s.get("category") or "", s.get("message") or "")
+                changed = True
+        if changed:
+            f["status"] = _flow_status(f["steps"])
     return _mk(M.RunData, {**d, "results": results, "timeline": timeline})
 
 
 def _flow_status(steps: list[dict]) -> str:
-    sts = {x.get("status") for x in steps if not (x.get("status") == M.BLOCKED and x.get("category") in ("nodata", "na"))}
+    sts = {x.get("status") for x in steps
+           if not (x.get("status") in (M.BLOCKED, M.NOT_TESTED)
+                   and (x.get("category") in ("nodata", "na") or x.get("cause") in ("data", "na")))}
     if M.FAIL in sts:
         return M.FAIL
     if M.BLOCKED in sts:
         return M.BLOCKED
+    if M.NOT_TESTED in sts:
+        return M.NOT_TESTED
     return M.PASS if sts else M.NA

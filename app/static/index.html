@@ -51,7 +51,7 @@
   .tbl { max-height:460px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
   .sev { font-weight:600; white-space:nowrap; }
   .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; color:#fff; }
-  .pill.Pass { background:var(--pass); } .pill.Fail { background:var(--fail); } .pill.Blocked { background:var(--block); } .pill.Pending { background:#94a3b8; }
+  .pill.Pass { background:var(--pass); } .pill.Fail { background:var(--fail); } .pill.Blocked { background:var(--block); } .pill.Pending { background:#94a3b8; } .pill.NotTested { background:#8b5cf6; }
   .hidden { display:none !important; }
   .muted { color:var(--muted); }
   .links a { margin-right:14px; font-size:13px; }
@@ -274,6 +274,7 @@
       <div class="kpi"><b class="pass" id="cPass">0</b><small>Pass</small></div>
       <div class="kpi"><b class="fail" id="cFail">0</b><small>Fail</small></div>
       <div class="kpi"><b class="blocked" id="cBlocked">0</b><small>Blocked</small></div>
+      <div class="kpi" title="Тест хийгдээгүй (хэрэгсэл/тохиргоо/өгөгдлийн шалтгаан) — апп-ын алдаа биш, Blocked биш"><b id="cNT">0</b><small>Шалгагдаагүй</small></div>
       <div class="kpi"><b id="cLogout">0</b><small>Logout</small></div>
       <div class="kpi"><b id="cCrash">0</b><small>Runtime уналт</small></div>
     </div>
@@ -373,8 +374,8 @@ const STATES = {starting:'эхэлж байна', login:'нэвтрэлт хүл
   awaiting_crud_selection:'автомат CRUD хийх цэсийн сонголт хүлээж байна',
   awaiting_form_selection:'форм шалгалт хийх цэсийн сонголт хүлээж байна',
   recording:'🎥 бичиж байна — хөтөч дээр урсгалаа хийнэ үү'};
-const STATUS_TXT = {Pending:'хүлээгдэж буй', running:'ажиллаж байна', Pass:'Pass', Fail:'Fail', Blocked:'Blocked'};
-const pill = (st) => `<span class="pill ${st === 'Pending' ? 'pending' : st}">${esc(STATUS_TXT[st] || st)}</span>`;
+const STATUS_TXT = {Pending:'хүлээгдэж буй', running:'ажиллаж байна', Pass:'Pass', Fail:'Fail', Blocked:'Blocked', 'Not Tested':'Шалгагдаагүй'};
+const pill = (st) => `<span class="pill ${st === 'Pending' ? 'pending' : String(st || '').replace(/\s+/g, '')}">${esc(STATUS_TXT[st] || st)}</span>`;
 
 // ---- Тестийн урсгал: алхам сонголт ----
 function syncSteps() {
@@ -738,7 +739,7 @@ function handle(ev) {
     $('bar').style.width = (ev.i / ev.n * 100).toFixed(1) + '%'; $('progTxt').textContent = `${ev.i}/${ev.n}`;
     $('eta').textContent = ev.eta_s ? `үлдсэн ≈ ${Math.floor(ev.eta_s/60)} мин ${ev.eta_s%60} сек` : '';
     $('current').textContent = ev.current; $('cPass').textContent = ev.counts.Pass || 0; $('cFail').textContent = ev.counts.Fail || 0;
-    $('cBlocked').textContent = ev.counts.Blocked || 0; $('cLogout').textContent = ev.logouts; $('cCrash').textContent = ev.crashes;
+    $('cBlocked').textContent = ev.counts.Blocked || 0; $('cNT').textContent = ev.counts['Not Tested'] || 0; $('cLogout').textContent = ev.logouts; $('cCrash').textContent = ev.crashes;
     $('lastErr').textContent = ev.last_error || '—';
   }
   else if (ev.type === 'stage') updStage(ev);
@@ -756,7 +757,7 @@ function handle(ev) {
   else if (ev.type === 'session_lost') {
     clearInterval(loginTimer); $('loginCd').textContent = '';
     $('loginBox').classList.remove('hidden'); $('loginBox').classList.add('drop');
-    $('loginTitle').textContent = '⛔ Дахин нэвтрэлтийн хугацаа хэтэрлээ — үлдсэн алхмууд Blocked';
+    $('loginTitle').textContent = '⛔ Дахин нэвтрэлтийн хугацаа хэтэрлээ — үлдсэн алхмууд шалгагдаагүй (Blocked биш)';
     $('loginReason').textContent = ev.reason || '';
   }
   else if (ev.type === 'error') logLine({level:'error', msg: ev.msg});
@@ -822,10 +823,13 @@ function showResult(s, status, error) {
     + skips.map(g => `<span title="${esc(g.menus.join(', '))}">${esc(g.label)} — <b>${g.count}</b></span>`).join(' · ') : '';
   if (sysw.length) $('resSkips').innerHTML += '<div class="warn" style="margin-top:6px">⚠ Олон цэст ижил анхааруулга (системийн/орчны тохиргоо — '
     + 'хөгжүүлэгчээр шалгуулна уу): ' + sysw.map(g => `<span title="${esc(g.menus.join(', '))}">«${esc(g.message)}» — <b>${g.count} цэс</b></span>`).join(' · ') + '</div>';
-  const st = s.stats, bc = s.bug_counts;
+  const st = s.stats, bc = s.bug_counts, cov = s.coverage || {};
+  const CAUSE = {tool: 'хэрэгсэл', data: 'тест өгөгдөл алга', operator: 'хэрэглэгч/тохиргоо', app: 'апп', dependent: 'өмнөх алхам', na: 'хамаарахгүй'};
+  const ntTip = Object.entries(cov.by_cause || {}).map(([c, n]) => `${CAUSE[c] || c}: ${n}`).join(', ');
   $('resKpis').innerHTML = [['Pass Rate', st.pass_rate + '%'], ['Нийт TC', st.total], ['Pass', st.pass, 'pass'], ['Fail', st.fail, 'fail'],
-    ['Blocked', st.blocked, 'blocked'], ['🔴 Critical', bc.critical], ['🟡 Major', bc.major], ['🟢 Minor', bc.minor]]
-    .map(([k, v, c]) => `<div class="kpi"><b class="${c || ''}">${v}</b><small>${k}</small></div>`).join('');
+    ['Blocked (апп талын саад)', st.blocked, 'blocked'], ['Шалгагдаагүй', cov.not_tested || 0, '', ntTip],
+    ['Хамрах хүрээ', (cov.pct ?? 100) + '%'], ['🔴 Critical', bc.critical], ['🟡 Major', bc.major], ['🟢 Minor', bc.minor]]
+    .map(([k, v, c, tip]) => `<div class="kpi"${tip ? ` title="${esc(tip)}"` : ''}><b class="${c || ''}">${v}</b><small>${k}</small></div>`).join('');
   for (const [id, k] of [['dlX','xlsx'],['dlD','docx'],['dlS','shots'],['dlR','raw'],['dlL','log'],['dlY','draft']]) $(id).href = `/runs/${runId}/download/${k}`;
   $('dlY').classList.toggle('hidden', !s.draft);
   $('formDl').classList.toggle('hidden', !s.form);

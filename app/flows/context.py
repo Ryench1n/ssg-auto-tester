@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import secrets
 import string
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
-from app.models import BLOCKED, FAIL, PASS, PENDING, Finding
+from app.models import BLOCKED, FAIL, NOT_TESTED, PASS, PENDING, Finding
 
 
 class StepFailed(Exception):
@@ -37,9 +38,19 @@ class MissingData(KeyError):
     """Алхмын аргументэд {key} байгаа ч өмнөх алхам тэр өгөгдлийг гаргаагүй."""
 
 
+_TAGS_USED: set[str] = set()
+_TAGS_LOCK = threading.Lock()
+
+
 def make_run_tag() -> str:
-    # Тестийн өгөгдөл бүрд орох давтагдашгүй угтвар — цэвэрлэх, мөргөлдөхөөс сэргийлэх
-    return f"SSG{datetime.now():%m%d}{secrets.token_hex(2).upper()}"
+    # Тестийн өгөгдөл бүрд орох давтагдашгүй угтвар — цэвэрлэх, мөргөлдөхөөс сэргийлэх. 20+ систем зэрэг
+    # ажиллахад нэг процесс доторх run бүр ӨӨР tag авна (4 hex санамсаргүй давхцлыг бүртгэлээр хаана).
+    with _TAGS_LOCK:
+        while True:
+            tag = f"SSG{datetime.now():%m%d}{secrets.token_hex(2).upper()}"
+            if tag not in _TAGS_USED:
+                _TAGS_USED.add(tag)
+                return tag
 
 
 _FMT = string.Formatter()
@@ -102,6 +113,7 @@ class StepResult:
     args: dict[str, Any] = field(default_factory=dict)   # YAML-ын (render хийгээгүй) аргумент — тайланд
     retried: bool = False          # session тасарсны дараа дахин ажилласан
     category: str = ""             # Blocked-ийн ангилал: nodata (N/A) | tool | ""
+    cause: str = ""                # Pass/Fail биш бол шалтгаан: app | tool | data | dependent | operator | na
 
 
 @dataclass
@@ -124,11 +136,14 @@ class FlowRun:
     @property
     def status(self) -> str:
         # «nodata» (тест орчинд өгөгдөлгүй — N/A) алхмууд урсгалын төлөвт нөлөөлөхгүй
-        sts = {s.status for s in self.steps if not (s.status == BLOCKED and s.category in ("nodata", "na"))}
+        sts = {s.status for s in self.steps
+               if not (s.status in (BLOCKED, NOT_TESTED) and (s.category in ("nodata", "na") or s.cause in ("data", "na")))}
         if self.error or FAIL in sts:
             return FAIL
-        if BLOCKED in sts or not self.steps:
-            return BLOCKED
+        if BLOCKED in sts:
+            return BLOCKED          # апп талын нотолгоотой саад
+        if NOT_TESTED in sts or not self.steps:
+            return NOT_TESTED       # хэрэгсэл/хэрэглэгч/өмнөх алхмын улмаас бүрэн шалгагдаагүй
         if not sts:     # бүх алхам N/A (өгөгдөлгүй / хамаарахгүй) — шалгах зүйлгүй, Blocked биш
             return "N/A"
         return PASS

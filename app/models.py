@@ -34,6 +34,9 @@ PRIMARY_KINDS = {RUNTIME_CRASH, AUTH_ERROR, PAGE_RELOAD, SYSTEM_ERROR, LOADING_S
                  TIMEOUT, FORBIDDEN, WARNING_TOAST, BLANK_PAGE}
 
 PASS, FAIL, BLOCKED, PENDING = "Pass", "Fail", "Blocked", "Pending"
+# Шалгагдаагүй — шалтгаан нь шалгаж буй апп БИШ (хэрэгсэл, тест өгөгдөл, хэрэглэгч, өмнөх алхам). BLOCKED нь зөвхөн апп
+# талын нотолгоотой саад (app/runner/classify/cause.py). TC/Pass Rate-д орохгүй, тайланд шалтгаантай нь тусад нь.
+NOT_TESTED = "Not Tested"
 
 
 @dataclass
@@ -71,6 +74,7 @@ class ItemResult:
     status: str = PENDING
     findings: list[Finding] = field(default_factory=list)
     blocked_reason: str = ""
+    cause: str = ""               # Pass/Fail биш бол шалтгаан: app | tool | data | operator | … (classify/cause.py)
     tab_opened: bool = False
     tab_name: str = ""
     load_ms: int | None = None

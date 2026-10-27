@@ -131,7 +131,7 @@ def test_failure_blocks_dependents_and_cleanup_needs_data(srv, tmp_path):
         {"uses": "crud.delete", "always": True, "with": {"find": "{customer}"}},
     ])
     steps = flow["steps"]
-    assert statuses(flow) == [M.PASS, M.FAIL, M.BLOCKED, M.BLOCKED]
+    assert statuses(flow) == [M.PASS, M.FAIL, M.NOT_TESTED, M.NOT_TESTED]
     assert {M.SYSTEM_ERROR, M.HTTP_5XX} <= kinds(steps[1]), steps[1]["findings"]
     assert "RegNo" in steps[1]["message"] and steps[1]["screenshot"]
     assert "#2" in steps[2]["message"]                  # өмнөх алхмаас болж Blocked
@@ -173,13 +173,13 @@ def test_manual_login_timeout_blocks_all_steps(srv, tmp_path):
     ], human=human, overrides={"timing": {**FAST["timing"], "manual_login_timeout_ms": 1500, "relogin_timeout_ms": 1500}})
     assert human.calls == 1
     assert not data.login_ok and data.login_timeout and "хугацаа" in data.login_error
-    assert data.pipeline[0]["status"] == M.BLOCKED and data.pipeline[1]["status"] == M.BLOCKED
-    assert statuses(flow) == [M.BLOCKED, M.BLOCKED]
+    assert data.pipeline[0]["status"] == M.NOT_TESTED and data.pipeline[1]["status"] == M.NOT_TESTED
+    assert statuses(flow) == [M.NOT_TESTED, M.NOT_TESTED]
     assert all("Нэвтрэлт амжилтгүй" in s["message"] for s in flow["steps"])
 
 
 @e2e
-def test_tool_error_is_blocked_not_app_bug(srv, tmp_path):
+def test_tool_error_is_not_tested_not_app_bug(srv, tmp_path):
     """Хэрэгслийн кодын алдаа (TypeError г.м.) аппын bug болохгүй — Blocked «tool». 2026-10-13 HR run-д хуучин
     сервер + шинэ кодын холилдлоос 103 урсгал TypeError-оор Fail болж худал bug үүсгэсэн."""
     from app.flows.engine import step
@@ -191,8 +191,8 @@ def test_tool_error_is_blocked_not_app_bug(srv, tmp_path):
     _, fl = run_flow(srv, tmp_path, [{"uses": "crud.open", "with": {"menu": MENU}},
                                      {"uses": "test.tool_boom"}], name="boom")
     st = fl["steps"][1]
-    assert st["status"] == M.BLOCKED and st["category"] == "tool", st
-    assert "Хэрэгслийн дотоод алдаа" in st["message"] and fl["status"] == M.BLOCKED
+    assert st["status"] == M.NOT_TESTED and st["category"] == "tool", st
+    assert "Хэрэгслийн дотоод алдаа" in st["message"] and fl["status"] == M.NOT_TESTED
 
 
 
@@ -210,4 +210,4 @@ def test_playwright_locator_timeout_is_tool_error(srv, tmp_path):
 
     _, fl = run_flow(srv, tmp_path, [{"uses": "test.locator_timeout"}], name="lt")
     st = fl["steps"][0]
-    assert st["status"] == M.BLOCKED and st["category"] == "tool", st
+    assert st["status"] == M.NOT_TESTED and st["category"] == "tool", st

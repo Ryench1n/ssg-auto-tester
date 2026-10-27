@@ -341,7 +341,7 @@ def test_want_matches_plain_strict_and_pattern():
 
 
 @e2e
-def test_blocked_step_in_e2e_flow_keeps_its_test_cases(tmp_path):
+def test_unexecuted_e2e_step_is_reported_not_hidden(tmp_path):
     """Автомат CRUD-ийн «урсгалыг алгасах» (skip_flow) нь E2E сценарид хэрэглэгдэхгүй — P2 (2026-10-19): кассын алхам
     Blocked болоход 27 TC бүгд тайлангаас алга болж «GO 100%» гарсан. Одоо TC-үүд үлдэж Blocked харагдана."""
     from app.report.build import generate_reports
@@ -358,11 +358,14 @@ def test_blocked_step_in_e2e_flow_keeps_its_test_cases(tmp_path):
                               on_waiting_login=HumanLogin("admin", PASSWORD))
         data = asyncio.run(pipe.run())
     fl = data.flows[0]
-    assert fl["steps"][0]["status"] == M.BLOCKED and "skipped" not in (fl.get("meta") or {}), fl["steps"][0]["message"]
+    st0 = fl["steps"][0]
+    assert st0["status"] == M.NOT_TESTED and st0["cause"] != "app", st0      # апп-ын нотолгоогүй → Blocked биш
+    assert "skipped" not in (fl.get("meta") or {}), st0["message"]
     summary = generate_reports(data, cfg, tmp_path, verify=False)
-    ids = [t["id"] for t in summary["tcs"]]
-    assert "TC-FLOW-EB-001" in ids and summary["decision"] != "GO" or summary["stats"]["blocked"] >= 1, (ids, summary["stats"])
-    assert "TC-FLOW-EB-001" in ids
+    # Ажиллаагүй алхам тайлангаас алга болохгүй: «Шалгагдаагүй» жагсаалтад шалтгаантай нь, дүгнэлт GO биш
+    nt = [x for x in summary["not_tested"]["items"] if x["kind"] == "flow"]
+    assert nt and nt[0]["cause"] == st0["cause"], summary["not_tested"]
+    assert summary["decision"] != "GO", (summary["decision"], summary["stats"])
 
 
 @e2e

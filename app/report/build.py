@@ -15,6 +15,7 @@ from app.report.docx_writer import write_report_docx
 from app.report.verify import VerificationError, soffice_bin, verify_docx, verify_xlsx
 from app.report.xlsx_writer import write_test_cases_xlsx
 from app.runner.classify import build_bugs, build_test_cases, flow_step_key, go_no_go, is_form_flow
+from app.runner.classify.testcases import not_tested_items
 
 XLSX_TEMPLATE = TEMPLATES_DIR / "07_Test-Cases-Загвар.xlsx"
 DOCX_TEMPLATE = TEMPLATES_DIR / "09_Test-Report-Загвар.docx"
@@ -121,7 +122,7 @@ SKIP_KINDS = {
 def auto_skip_kind(flow: dict) -> str:
     if (flow.get("meta") or {}).get("infra"):
         return "infra"
-    st = next((s for s in flow.get("steps") or [] if s.get("status") == M.BLOCKED), {})
+    st = next((s for s in flow.get("steps") or [] if s.get("status") in (M.BLOCKED, M.NOT_TESTED)), {})
     cat = st.get("category") or ""
     return cat if cat in SKIP_KINDS else ""
 
@@ -150,7 +151,7 @@ def systemic_warnings(flows: list[dict], min_menus: int = 5) -> list[dict]:
         meta = f.get("meta") or {}
         if not (meta.get("auto") and meta.get("skipped")) or meta.get("setup"):
             continue
-        st = next((s for s in f.get("steps") or [] if s.get("status") == M.BLOCKED), None)
+        st = next((s for s in f.get("steps") or [] if s.get("status") in (M.BLOCKED, M.NOT_TESTED)), None)
         msg = (st or {}).get("message") or ""
         if "хүлээж авсангүй" not in msg:
             continue
@@ -187,7 +188,9 @@ def generate_reports(run: RunData, cfg: dict, run_dir: Path, verify: bool = True
         for s in fl.get("steps") or []:
             s["screenshot"] = new_shot.get(flow_step_key(fl["flow"], s["index"]), s.get("screenshot", ""))
     bugs = build_bugs(run, tcs, cfg)
-    go = go_no_go(tcs, bugs, cancelled=run.cancelled)
+    nt = not_tested_items(run)
+    go = go_no_go(tcs, bugs, cancelled=run.cancelled, not_tested=nt,
+                  min_coverage=float((cfg.get("verdict") or {}).get("min_coverage", 90)))
 
     proj = safe_project(run.project)
     xlsx = run_dir / f"{proj}-Test-Cases-{run.version_label}.xlsx"
@@ -227,6 +230,9 @@ def generate_reports(run: RunData, cfg: dict, run_dir: Path, verify: bool = True
         "verification": verification,
         "run_tag": run.run_tag,
         "draft": run.draft,
+        "coverage": go["coverage"],
+        # Шалгагдаагүй (TC биш) — шалтгаантай: tool | data | operator | app-ийн бус. Blocked-оос тусдаа
+        "not_tested": {"by_cause": go["coverage"]["by_cause"], "items": nt[:400]},
         "auto_skips": auto_skip_counts(run.flows),
         "systemic": systemic_warnings(run.flows),
         "leftovers": leftovers(run.flows),
@@ -235,7 +241,8 @@ def generate_reports(run: RunData, cfg: dict, run_dir: Path, verify: bool = True
                    "setup": bool((f.get("meta") or {}).get("setup")),
                    "skipped": (f.get("meta") or {}).get("skipped", ""),
                    "steps": [{"index": s["index"], "name": s["name"], "status": s["status"],
-                              "message": s.get("message", "")} for s in f.get("steps") or []]}
+                              "cause": s.get("cause", ""), "message": s.get("message", "")}
+                             for s in f.get("steps") or []]}
                   for f in run.flows],
         "bugs": [{"id": b.bug_id, "severity": b.severity.xlsx, "title": b.title, "tcs": b.tc_ids,
                   "modules": b.modules, "signature": b.signature, "fix": b.fix,
@@ -307,7 +314,8 @@ def _form_reports(run: RunData, cfg: dict, run_dir: Path, tcs, proj: str, verify
                    timeline=[t for t in run.timeline if "Форм шалгалт" in t.activity or "Нэвтрэ" in t.activity])
     ftcs = [t for t in tcs if t.tc_id.startswith("TC-FORM-")]
     fbugs = build_bugs(frun, ftcs, cfg)
-    fgo = go_no_go(ftcs, fbugs, cancelled=run.cancelled)
+    fgo = go_no_go(ftcs, fbugs, cancelled=run.cancelled,
+                   not_tested=[x for x in not_tested_items(run) if x["kind"] == "form"])
     xlsx = run_dir / f"{proj}-Form-Check-Test-Cases-{run.version_label}.xlsx"
     docx = run_dir / f"{proj}-Form-Check-Report-{run.version_label}.docx"
     expected = write_test_cases_xlsx(XLSX_TEMPLATE, xlsx, run.project, run.version_label, ftcs, fbugs,

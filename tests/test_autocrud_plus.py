@@ -165,7 +165,7 @@ def test_cleanup_after_failed_create(deps_run):
 def test_undeletable_leftover_is_reported(deps_run):
     lock = deps_run["by"][LOCK]
     st = {s["index"]: s for s in lock["steps"]}
-    assert st[7]["status"] == M.BLOCKED and "гараар устгана уу" in st[7]["message"], steps_of(lock)
+    assert st[7]["status"] == M.NOT_TESTED and "гараар устгана уу" in st[7]["message"], steps_of(lock)
     left = deps_run["summary"]["leftovers"]
     lock_left = [x for x in left if x["menu"] == "Мастер дата / Бүртгэл / Түгжээ"]
     assert lock_left and "{run_tag}" in lock_left[0]["items"][0]
@@ -182,9 +182,11 @@ def test_not_applicable_checks_are_not_counted(deps_run):
     lock = deps_run["by"][LOCK]
     tcs = [t for t in deps_run["summary"]["tcs"] if t["id"].startswith(f"TC-FLOW-{lock['code']}-")]
     # Өмнөх алхмаас хамаарч ажиллаагүй алхмууд тусдаа TC биш — эх алхмын TC-д «дараагийн N алхам ажиллаагүй»
-    dependent = [s for s in lock["steps"] if s["status"] == M.BLOCKED
+    dependent = [s for s in lock["steps"] if s["status"] in (M.BLOCKED, M.NOT_TESTED)
                  and s["message"].startswith(("Өмнөх алхам", "Шаардлагатай өгөгдөл алга"))]
-    assert dependent and len(tcs) == len(lock["steps"]) - len(dependent)
+    # Ажиллаагүй (Шалгагдаагүй) алхам ч TC биш — тайлангийн «Шалгагдаагүй» жагсаалтад шалтгаантай нь
+    not_run = [s for s in lock["steps"] if s["status"] == M.NOT_TESTED and s not in dependent]
+    assert dependent and len(tcs) == len(lock["steps"]) - len(dependent) - len(not_run)
     assert any("алхам ажиллаагүй" in t["note"] for t in tcs), [t["note"] for t in tcs]
     proj_na = [s for fl in deps_run["data"].flows for s in fl["steps"] if s.get("category") == "na"]
     na_ids = {f"TC-FLOW-{fl['code']}-{s['index']:03d}" for fl in deps_run["data"].flows for s in fl["steps"]
@@ -263,7 +265,7 @@ def test_saved_but_invisible_record_is_not_reported_clean(deps_run):
     g = deps_run["by"][GHOST]
     st = {s["index"]: s for s in g["steps"]}
     assert st[1]["status"] == M.PASS and st[2]["status"] == M.FAIL
-    assert st[7]["status"] == M.BLOCKED and "гараар шалгана уу" in st[7]["message"], steps_of(g)
+    assert st[7]["status"] == M.NOT_TESTED and "гараар шалгана уу" in st[7]["message"], steps_of(g)
     assert any(x["menu"].endswith("Үл харагдах жагсаалт") for x in deps_run["summary"]["leftovers"])
 
 
@@ -342,7 +344,7 @@ def test_key_not_in_list_columns_is_not_created(tmp_path):
         pipe, cfg = make_pipe(srv, tmp_path, [{"kind": "crud", "flow": "x"}], [], extra={"flows": {"x": spec}})
         d = asyncio.run(pipe.run())
     st = d.flows[0]["steps"][0]
-    assert st["status"] == M.BLOCKED and "баганад алга" in st["message"] and st["category"] == "tool", st
+    assert st["status"] == M.NOT_TESTED and "баганад алга" in st["message"] and st["category"] == "tool", st
     assert not d.flows[0]["data"]
 
 

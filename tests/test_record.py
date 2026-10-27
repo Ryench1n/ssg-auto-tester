@@ -154,7 +154,7 @@ def test_record_save_and_replay(recdir, tmp_path, monkeypatch):
         pipe3, _ = make_pipe(srv, tmp_path / "bad", [{"kind": "crud", "flow": "rec: муу"}], [])
         d3 = asyncio.run(pipe3.run())
         st = d3.flows[0]["steps"]
-        assert st[-1]["status"] == M.BLOCKED and "бодит" in st[-1]["message"], st[-1]
+        assert st[-1]["status"] == M.NOT_TESTED and "бодит" in st[-1]["message"], st[-1]
         assert any(c["name"] == "Бодит харилцагч ХХК" for c in srv.state.customers)
         assert c.delete("/api/recorded", params={"url": srv.url, "name": "rec: муу"}).status_code == 200
 

@@ -27,6 +27,12 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from urllib.parse import urlparse
 
 from app import models as M
+from app.runner.classify.cause import cause_of, status_for
+
+# Өгөгдөл өөрчлөхгүй алхмууд — хэрэгслийн түр саадаар зогсвол сэргээгээд 1 удаа дахин ажиллуулахад аюулгүй
+RETRYABLE_STEPS = {"report.read", "assert.delta", "doc.number", "crud.search", "crud.open", "crud.auto_verify",
+                   "form.check_new", "form.check_actions", "form.check_edit", "ui.menu", "ui.search", "ui.tab",
+                   "auth.expect_access"}
 from app.flows.context import (FlowContext, FlowRun, MissingData, StepBlocked, StepFailed, StepResult,
                                placeholders)
 from app.runner import browser as browser_mod
@@ -263,10 +269,11 @@ class FlowEngine:
 
     def _fill_blocked(self, reason: str) -> None:
         steps = self.spec.get("steps") or []
+        status, cause = status_for("", reason)
         for i, s in enumerate(steps[len(self.run.steps):], len(self.run.steps) + 1):
             args = s.get("with") or {}
             self.run.steps.append(StepResult(
-                index=i, uses=s["uses"], name=s.get("name") or s["uses"], status=M.BLOCKED, message=reason,
+                index=i, uses=s["uses"], name=s.get("name") or s["uses"], status=status, cause=cause, message=reason,
                 requires=sorted(placeholders(args) | set(s.get("requires") or [])),
                 always=bool(s.get("always")), args=dict(args)))
 
@@ -298,11 +305,39 @@ class FlowEngine:
                 res.message = f"Өмнөх алхам #{broken.index} ({broken.name}) {broken.status}"
             else:
                 await self._run_with_session(res, STEPS[uses], args, timeout_s)
+                if (res.status == M.BLOCKED and uses in RETRYABLE_STEPS and not res.retried
+                        and cause_of(res.category, res.message) == "tool" and not self.cancel_event.is_set()):
+                    # Хэрэгслийн түр зуурын саад (timeout, элемент, selector) — өгөгдөл өөрчлөхгүй алхмыг сэргээгээд 1 удаа
+                    # дахин ажиллуулна; хоёр дахь удаа ч мөн адил бол л «шалгагдаагүй (хэрэгсэл)»
+                    first = res.message
+                    await self._recover_ui()
+                    res.status, res.message, res.findings, res.screenshot, res.outputs = M.PENDING, "", [], "", {}
+                    notes = res.notes + [f"Хэрэгслийн шалтгаантай зогссон тул сэргээж дахин ажиллуулав ({first[:120]})"]
+                    await self._run_with_session(res, STEPS[uses], args, timeout_s)
+                    res.notes = notes + [n for n in res.notes if n not in notes]
+            if res.status == M.BLOCKED:
+                # BLOCKED зөвхөн апп талын НОТОЛГООТОЙ саад; бусад нь «Шалгагдаагүй» + шалтгаан (classify/cause.py)
+                res.status, res.cause = status_for(res.category, res.message)
             if res.status != M.PASS and broken is None:
                 broken = res
             self.log(f"[{self.flow_name}] #{i} {res.name}: {res.status}{' — ' + res.message if res.message else ''}",
                      "info" if res.status == M.PASS else "warn")
             self._emit_step(res, res.status)
+
+    async def _recover_ui(self) -> None:
+        """Хэрэгслийн түр саадын дараах сэргээлт: нээлттэй цонх/toast хааж, хуудас тайван болохыг хүлээнэ."""
+        if self.page is None:
+            return
+        from app.flows import ui
+        for fn in (ui.close_form, ui.clear_toasts):
+            try:
+                await fn(self)
+            except Exception:
+                pass
+        try:
+            await ui.settle(self, 5)
+        except Exception:
+            pass
 
     async def _run_with_session(self, res: StepResult, sd: StepDef, raw_args: dict, timeout_s: float) -> None:
         from app.pipeline.session import SessionLost

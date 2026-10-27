@@ -236,7 +236,8 @@ class PipelineRunner:
                 if idx > 0:
                     spec = self.steps[idx - 1]
                     STAGES[spec.kind].skip(self, spec, reason)
-                self._stage(idx, M.BLOCKED, reason)
+                # Ажиллаагүй үе шат — апп-ын саадын нотолгоо биш (зогсоосон / нэвтрээгүй / session) → Шалгагдаагүй
+                self._stage(idx, M.NOT_TESTED, reason)
 
     async def _run_stages(self) -> None:
         # 1. Нэвтрэх (гараар, заавал)
@@ -257,7 +258,7 @@ class PipelineRunner:
             self.runlog.log(f"Нэвтрэлт амжилтгүй: {self.data.login_error}", "error")
             self.data.timeline.append(TimelineEvent(now_iso(), "Нэвтрэлт", "Fail", self.data.login_error))
             await self._screenshot("login-failed")
-            self._stage(0, M.BLOCKED if self.data.login_timeout else M.FAIL, self.data.login_error)
+            self._stage(0, M.NOT_TESTED if self.data.login_timeout else M.FAIL, self.data.login_error)
             self._skip_rest(f"Нэвтрэлт амжилтгүй: {self.data.login_error}")
             return
         self.data.login_ok = True

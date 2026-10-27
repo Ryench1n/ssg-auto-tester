@@ -48,26 +48,60 @@ INFRA_PATTERNS = ("цэс олдсонгүй", "цэсийг дарж чадса
                   "net::ERR_", "Хөтөч хаагдсан")
 
 
+def stage_counts_msg(total: int, cnt: dict) -> str:
+    msg = f"{total} цэс: Pass {cnt.get(M.PASS, 0)} / Fail {cnt.get(M.FAIL, 0)} / Blocked {cnt.get(M.BLOCKED, 0)}"
+    if cnt.get(M.NOT_TESTED):
+        msg += f" / Шалгагдаагүй {cnt[M.NOT_TESTED]}"
+    return msg
+
+
+def stage_status(cnt: dict) -> str:
+    """Үе шатны төлөв: Fail > Blocked (апп талын саад) > Шалгагдаагүй (хэрэгсэл/хэрэглэгч) > Pass."""
+    for st in (M.FAIL, M.BLOCKED, M.NOT_TESTED):
+        if cnt.get(st):
+            return st
+    return M.PASS
+
+
 def infra_broken(run) -> bool:
     """Урсгалын ажилласан бүх алхам орчны тасалдлын шинжтэй мессежээр бүтэлгүйтсэн эсэх."""
     # Өмнөх алхмаас хамаарч Blocked болсон алхмууд («Өмнөх алхам #1 … Fail», «Шаардлагатай өгөгдөл алга») өөрсдөө
     # шинж биш — тэдгээрийг тооцохгүй (автомат CRUD-ийн 8 алхамт урсгал)
     dependent = ("Өмнөх алхам", "Шаардлагатай өгөгдөл алга")
-    steps = [s for s in run.steps if not (s.status == M.BLOCKED and s.category in ("nodata", "na"))
-             and not (s.status == M.BLOCKED and (s.message or "").startswith(dependent))]
-    bad = [s for s in steps if s.status in (M.FAIL, M.BLOCKED)]
+    skipped = (M.BLOCKED, M.NOT_TESTED)
+    steps = [s for s in run.steps if not (s.status in skipped and s.category in ("nodata", "na"))
+             and not (s.status in skipped and (s.message or "").startswith(dependent))]
+    bad = [s for s in steps if s.status in (M.FAIL, M.BLOCKED, M.NOT_TESTED)]
     return bool(steps) and len(bad) == len(steps) and all(
         any(p in (s.message or "") for p in INFRA_PATTERNS) for s in bad)
 
 
-def auto_infra_broken(run) -> bool:
+def auto_infra_broken(run, toolbar_known: bool = True) -> bool:
     """Автомат CRUD: орчны тасалдал. Цэс бүрийг smoke «Нэмэх + Устгах»-тай гэж бүртгэсэн тул «Нэмэх товч олдсонгүй» нь
     апп эвдэрсний шинж (testhr 2026-10-22: «Хоолны меню»-ийн «Data is Null»-ийн дараа toolbar бүхэлдээ алга болж 68 цэс
     дараалан «Нэмэх товч олдсонгүй»)."""
     if infra_broken(run):
         return True
-    first = next((s for s in run.steps if s.status in (M.FAIL, M.BLOCKED)), None)
+    if not toolbar_known:
+        return False      # smoke-оор toolbar нь батлагдаагүй цэс — «Нэмэх товч алга» нь апп-ын нотолгоо биш
+    first = next((s for s in run.steps if s.status in (M.FAIL, M.BLOCKED, M.NOT_TESTED)), None)
     return bool(first and first.index == 1 and (first.message or "").startswith("Нэмэх товч ("))
+
+
+# Хэрэгслийн түр зуурын (давтахад ихэвчлэн арилдаг) шинж — Playwright timeout, элемент салсан/далдлагдсан г.м.
+TRANSIENT_TOOL = ("Timeout", "timeout", "хугацаа хэтэрсэн", "intercepts pointer events", "not attached",
+                  "detached", "is not visible", "Execution context was destroyed", "Element is outside of the viewport")
+# Хөтөч/хуудас хаагдсан — апп-ын нотолгоо БИШ (хэрэглэгч хаасан эсвэл хөтчийн driver унасан)
+BROWSER_GONE = ("Хөтөч хаагдсан", "has been closed", "Target closed", "Browser closed")
+
+
+def auto_tool_transient(run) -> bool:
+    """Автомат CRUD: эхний алхам (форм нээх/бөглөх — өгөгдөл үүсээгүй) хэрэгслийн түр зуурын шалтгаанаар
+    ажиллаагүй — апп-ыг дахин ачаалж нэг удаа давтахад аюулгүй."""
+    first = next((s for s in run.steps if s.status in (M.FAIL, M.BLOCKED, M.NOT_TESTED)), None)
+    return bool(first and first.index == 1 and first.status == M.NOT_TESTED and first.cause == "tool"
+                and any(p in (first.message or "") for p in TRANSIENT_TOOL)
+                and not any(p in (first.message or "") for p in BROWSER_GONE))
 
 
 def page_stem(name: str) -> str:
@@ -190,17 +224,15 @@ class SmokeStage(Stage):
         finally:
             pipe.smoke = None
         rs = pipe.data.results
-        cnt = {k: sum(1 for r in rs if r.status == k) for k in (M.PASS, M.FAIL, M.BLOCKED)}
-        msg = f"{len(rs)} цэс: Pass {cnt[M.PASS]} / Fail {cnt[M.FAIL]} / Blocked {cnt[M.BLOCKED]}"
+        cnt = {k: sum(1 for r in rs if r.status == k) for k in (M.PASS, M.FAIL, M.BLOCKED, M.NOT_TESTED)}
+        msg = stage_counts_msg(len(rs), cnt)
         if pipe.session.lost:
-            return M.BLOCKED, f"{msg} — {pipe.session.lost_reason}"
+            return M.NOT_TESTED, f"{msg} — {pipe.session.lost_reason}"
         if pipe.data.cancelled:
-            return M.BLOCKED, f"{msg} — хэрэглэгч зогсоосон"
+            return M.NOT_TESTED, f"{msg} — хэрэглэгч зогсоосон"
         if not rs:
-            return M.BLOCKED, "Шалгах цэс олдсонгүй"
-        if cnt[M.FAIL]:
-            return M.FAIL, msg
-        return (M.BLOCKED if cnt[M.BLOCKED] else M.PASS), msg
+            return M.NOT_TESTED, "Шалгах цэс олдсонгүй"
+        return stage_status(cnt), msg
 
 
 # ----------------------------------------------------------------------- crud
@@ -365,10 +397,10 @@ class AutoCrudStage(Stage):
         if keys is None:
             cands = crud_candidates(pipe.data.results)
             if not cands:
-                return M.BLOCKED, "Smoke-оос автомат CRUD хийх боломжтой (Нэмэх + Устгах) цэс олдсонгүй"
+                return M.NOT_TESTED, "Smoke-оос автомат CRUD хийх боломжтой (Нэмэх + Устгах) цэс олдсонгүй"
             keys = await pipe.wait_crud_selection(cands)
         if not keys:
-            return M.BLOCKED, "Автомат CRUD хийх цэс сонгогдоогүй — алгасав"
+            return M.NOT_TESTED, "Автомат CRUD хийх цэс сонгогдоогүй — алгасав"
         runs = []
         streak = 0
         for n, key in enumerate(keys):
@@ -398,11 +430,13 @@ class AutoCrudStage(Stage):
         if len(runs) < len(keys):
             msg += f", ажиллаагүй {len(keys) - len(runs)}"
         if not tested:
-            return M.BLOCKED, msg
+            return M.NOT_TESTED, msg
         if any(r.status == M.FAIL for r in tested):
             return M.FAIL, msg
-        if any(r.status == M.BLOCKED for r in tested) or len(runs) < len(keys):
-            return M.BLOCKED, msg
+        if any(r.status == M.BLOCKED for r in tested):
+            return M.BLOCKED, msg               # апп талын нотолгоотой саад
+        if any(r.status == M.NOT_TESTED for r in runs) or len(runs) < len(keys):
+            return M.NOT_TESTED, msg
         return M.PASS, msg
 
     async def _flow(self, pipe: "PipelineRunner", key: str, code: str, spec: dict, title: str = "",
@@ -415,8 +449,25 @@ class AutoCrudStage(Stage):
                          session=pipe.session, cancel_event=pipe.halt, emit=pipe.emit, run_id=pipe.run_id,
                          code=code, meta={"auto": True, "menu": menu_path(item), "menu_key": key, **(meta or {})})
         tabs0 = await _tabs(pipe)
+        # «Нэмэх товч алга»-г апп-ын тасалдал гэж үзэх нотолгоо: smoke энэ цэсэд Нэмэх + Устгах товчийг харсан, эсвэл
+        # өмнөх цэс апп-ын алдаагаар (Fail) / тасалдлаар дууссан (HR 2026-10-22: «Data is Null»-ийн дараа toolbar алга).
+        # Нотолгоогүй бол товчгүй цэс — «алгассан», апп-д хамааруулахгүй.
+        prev = next((f for f in reversed(pipe.data.flows) if (f.get("meta") or {}).get("auto")), None)
+        known = (any(r.item.key == key and (r.caps or {}).get("crud") == "full" for r in pipe.data.results)
+                 or bool(prev and (prev.get("status") == M.FAIL or (prev.get("meta") or {}).get("infra"))))
         run = await eng.execute(pipe.page, pipe.col)
-        if auto_infra_broken(run) and not pipe.halt.is_set():
+        if auto_tool_transient(run) and not pipe.halt.is_set():
+            # Хэрэгслийн түр зуурын алдаа (timeout, элемент салсан) — апп-ын bug ч, Blocked ч биш: дахин ачаалж нэг удаа
+            first = next((x.message for x in run.steps if x.message), "")[:120]
+            pipe.runlog.log(f"Автомат CRUD: «{menu_path(item)}» — хэрэгслийн түр зуурын алдаа ({first}) — дахин "
+                            "ачаалж дахин оролдоно", "warn")
+            await ui.reload_app(eng, "хэрэгслийн түр зуурын алдаа (автомат CRUD)")
+            eng = FlowEngine(pipe.url, name, cfg, pipe.run_dir, ctx=pipe.flow_ctx, runlog=pipe.runlog,
+                             session=pipe.session, cancel_event=pipe.halt, emit=pipe.emit, run_id=pipe.run_id,
+                             code=code, meta={"auto": True, "menu": menu_path(item), "menu_key": key, **(meta or {})})
+            run = await eng.execute(pipe.page, pipe.col)
+            run.meta["tool_retried"] = True
+        if auto_infra_broken(run, known) and not pipe.halt.is_set():
             # Аппын bug биш — апп-ыг дахин ачаалж нэг удаа дахин шалгана
             first = next((x.message for x in run.steps if x.message), "")[:120]
             pipe.runlog.log(f"Автомат CRUD: «{menu_path(item)}» — орчны тасалдлын шинж ({first}) — дахин ачаалж "
@@ -427,11 +478,17 @@ class AutoCrudStage(Stage):
                              code=code, meta={"auto": True, "menu": menu_path(item), "menu_key": key, **(meta or {})})
             run = await eng.execute(pipe.page, pipe.col)
             run.meta["rechecked"] = True
-            if auto_infra_broken(run):
-                # Дахин ачаалсан ч мөн адил — цэсийг шалгаж чадаагүй (TC/bug үүсгэхгүй), Fail биш
+            if auto_infra_broken(run, known):
+                # Дахин ачаалж дахин шалгасан ч мөн адил — апп талын НОТОЛГООТОЙ саад: Blocked (шалтгаан «app»),
+                # Fail/bug биш, мөн «алгассан» биш (тайланд Blocked TC болж GO/NO-GO-д тусна)
                 run.meta["infra"] = True
-                run.meta["skipped"] = (f"Орчны тасалдал — апп хариу өгөхгүй/цэс олдохгүй байсан тул шалгаагүй "
-                                       f"({next((x.message for x in run.steps if x.message), '')[:120]})")
+                run.meta.pop("skipped", None)
+                for st in run.steps:
+                    if any(p in (st.message or "") for p in BROWSER_GONE):
+                        continue              # хөтөч/хуудас хаагдсан — апп-ын нотолгоо биш (Шалгагдаагүй хэвээр)
+                    if st.status == M.FAIL or (st.status == M.NOT_TESTED and st.cause == "tool"):
+                        st.status, st.category, st.cause = M.BLOCKED, "infra", "app"
+                        st.message = f"Тест орчин хариу өгөөгүй (дахин ачаалсан ч): {st.message}"[:500]
         try:
             await ui.close_form(eng)          # дараагийн цэсэнд нээлттэй форм/цонх саад болохгүй
             await ui.clear_toasts(eng)        # хуучин анхааруулгын toast дараагийн цэсийг Fail болгохгүй
@@ -601,12 +658,12 @@ class FormCheckStage(Stage):
         if spec.menus is None:
             cands = form_candidates(pipe.data.results)
             if not cands:
-                return M.BLOCKED, "Smoke-оос Нэмэх/Засах товчтой цэс олдсонгүй"
+                return M.NOT_TESTED, "Smoke-оос Нэмэх/Засах товчтой цэс олдсонгүй"
             keys = await pipe.wait_form_selection(cands) if spec.select else [c["key"] for c in cands]
             caps = {c["key"]: c["caps"] for c in cands}
             targets = [(k, caps[k]) for k in keys]
             if not targets:
-                return M.BLOCKED, "Форм шалгалт хийх цэс сонгогдоогүй — алгасав"
+                return M.NOT_TESTED, "Форм шалгалт хийх цэс сонгогдоогүй — алгасав"
         else:
             targets = [(k, None) for k in spec.menus]
         runs = []
@@ -730,10 +787,13 @@ class FormCheckStage(Stage):
                                     "шалгана", "warn")
                     t_clean = time.monotonic()
                     continue
-                # хоёр дахь оролдлого ч тасалдсан — Fail биш, «шалгаж чадаагүй» (Blocked)
+                # хоёр дахь оролдлого ч тасалдсан — апп/сервер хариу өгөхгүй (нотолгоо: 2 оролдлого, дахин ачаалсан)
+                # → Fail биш, апп талын саад (Blocked, шалтгаан «app»)
                 for s in run.steps:
-                    if s.status == M.FAIL:
-                        s.status, s.category = M.BLOCKED, "tool"
+                    if s.status == M.FAIL and any(p in (s.message or "") for p in BROWSER_GONE):
+                        s.status, s.cause = M.NOT_TESTED, "operator"     # хөтөч хаагдсан — апп-ын нотолгоо биш
+                    elif s.status == M.FAIL:
+                        s.status, s.category, s.cause = M.BLOCKED, "infra", "app"
                         s.message = f"Тест орчин хариу өгөөгүй: {s.message}"[:500]
             else:
                 streak = 0
@@ -741,7 +801,7 @@ class FormCheckStage(Stage):
             run.meta["seconds"] = round(time.monotonic() - t0, 1)
             done = runs + [run]
             avg = sum(r.meta.get("seconds", 0) for r in done) / len(done)
-            counts = {k: sum(1 for r in done if r.status == k) for k in (M.PASS, M.FAIL, M.BLOCKED)}
+            counts = {k: sum(1 for r in done if r.status == k) for k in (M.PASS, M.FAIL, M.BLOCKED, M.NOT_TESTED)}
             last_fail = next((r for r in reversed(done) if r.status == M.FAIL), None)
             pipe.emit("progress", {
                 "i": n + 1, "n": len(targets), "current": f"🧾 {menu_path(item)} · {run.meta['seconds']}с",
@@ -760,8 +820,8 @@ class FormCheckStage(Stage):
         if pipe.data.resume.get(self.kind):
             pipe.data.resume[self.kind] = list(dict.fromkeys(pipe.data.resume[self.kind]))
         targets = list({k: (k, c) for k, c in targets}.values())
-        cnt = {k: sum(1 for r in runs if r.status == k) for k in (M.PASS, M.FAIL, M.BLOCKED)}
-        msg = f"{len(targets)} цэс: Pass {cnt[M.PASS]} / Fail {cnt[M.FAIL]} / Blocked {cnt[M.BLOCKED]}"
+        cnt = {k: sum(1 for r in runs if r.status == k) for k in (M.PASS, M.FAIL, M.BLOCKED, M.NOT_TESTED)}
+        msg = stage_counts_msg(len(targets), cnt)
         na = sum(1 for r in runs if any(s.category in ("nodata", "na") and s.uses == "form.check_edit"
                                         for s in r.steps))
         if na:
@@ -775,9 +835,9 @@ class FormCheckStage(Stage):
         if len(runs) < len(targets):
             msg += (f", ажиллаагүй {len(targets) - len(runs)} (session тасарсан/зогсоосон — "
                     "«Үлдсэн цэсүүдийг үргэлжлүүлэх»-ээр дахин ажиллуулна)")
-        if cnt[M.FAIL]:
-            return M.FAIL, msg
-        return (M.BLOCKED if cnt[M.BLOCKED] or len(runs) < len(targets) else M.PASS), msg
+        if len(runs) < len(targets) and not cnt[M.FAIL] and not cnt[M.BLOCKED]:
+            return M.NOT_TESTED, msg
+        return stage_status(cnt), msg
 
 
 # --------------------------------------------------------------------- record
@@ -829,4 +889,4 @@ class RecordStage(Stage):
                                "events": len(rec.events), "steps": len(flow["steps"])}
         pipe.emit("rec_done", pipe.data.recording)
         msg = f"{len(rec.events)} үйлдэл → {len(flow['steps'])} алхам" + (f" · ⚠ {len(warnings)}" if warnings else "")
-        return (M.PASS if flow["steps"] else M.BLOCKED), msg
+        return (M.PASS if flow["steps"] else M.NOT_TESTED), msg

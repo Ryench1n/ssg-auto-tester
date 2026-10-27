@@ -248,7 +248,7 @@ def test_formcheck_improvements(checked):
     flows = {f["meta"]["menu_key"]: f for f in d.flows}
     # (1) Бүлэг/Гүйлгээ: жагсаалт хоосон → nodata ангилал, урсгалын төлөв түүнээс болж Blocked болохгүй
     g_edit = _step(flows[GROUPS], "form.check_edit")
-    assert g_edit["status"] == M.BLOCKED and g_edit["category"] == "nodata"
+    assert g_edit["status"] == M.NOT_TESTED and g_edit["category"] == "nodata"
     assert flows[GROUPS]["status"] == M.PASS
     tc_ids = {t["id"] for t in s["tcs"]}
     assert f"TC-FORM-{flows[GROUPS]['code']}-{g_edit['index']:03d}" not in tc_ids      # N/A — TC биш
@@ -312,7 +312,7 @@ def test_direct_form_menu(tmp_path):
         d = asyncio.run(pipe.run())
     fl = d.flows[0]
     ed, nw = _step(fl, "form.check_edit"), _step(fl, "form.check_new")
-    assert ed["status"] == M.BLOCKED and ed["category"] == "na", ed
+    assert ed["status"] == M.NOT_TESTED and ed["category"] == "na", ed
     assert nw["status"] == M.PASS and any("Шууд форм цэс" in n for n in nw["notes"]), nw
     assert any("Харилцагч" in n for n in nw["notes"]), nw["notes"]           # формын lookup шалгагдсан
     assert fl["status"] == M.PASS
@@ -399,7 +399,7 @@ def test_hr_run5_patterns(tmp_path):
     assert fl[CUSTOMERS]["status"] == M.PASS, [(s["status"], s["message"]) for s in fl[CUSTOMERS]["steps"]]
     # (2) засварын шалгалт: бүлгийн мөр биш — үндсэн жагсаалт хоосон → N/A; Шинэ: бүлэг сонгоод форм нээгдэнэ
     ee, en = _step(fl[emp], "form.check_edit"), _step(fl[emp], "form.check_new")
-    assert ee["status"] == M.BLOCKED and ee["category"] == "nodata", ee
+    assert ee["status"] == M.NOT_TESTED and ee["category"] == "nodata", ee
     assert en["status"] == M.PASS, en
     # (3) DbSet цонх → Fail (алдааны текстээр), «дарж чадсангүй»/tool биш
     msgs = [s["message"] for s in fl[dbset]["steps"]]

@@ -12,6 +12,8 @@ from docx.shared import Mm
 from app import models as M
 from app.models import Bug, RunData, TestCase
 from app.runner.classify import is_form_flow, tested_flows
+from app.runner.classify.cause import CAUSE_LABEL
+from app.runner.classify.testcases import item_effective_status, step_effective_status
 from app.runner.severity import Severity
 
 
@@ -138,11 +140,17 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
         n = sum(run.discovered[m] for m in skipped_mods)
         untested.append(f"Хэрэглэгч сонгоогүй {len(skipped_mods)} модуль ({n} цэс): "
                         + ", ".join(skipped_mods))
-    blocked = [r for r in run.results if r.status == M.BLOCKED]
-    if blocked:
-        names = ", ".join(f"{r.item.module} › {r.item.name}" for r in blocked[:8])
-        untested.append(f"Smoke-д шалгаж чадаагүй {len(blocked)} цэс: {names}"
-                        + (f" … (+{len(blocked) - 8}, Test Cases xlsx-ээс)" if len(blocked) > 8 else ""))
+    for st, label in ((M.BLOCKED, "Smoke — шалгаж буй систем саад болсон (Blocked)"),
+                      (M.NOT_TESTED, "Smoke — шалгагдаагүй (Blocked биш)")):
+        rows = [r for r in run.results if item_effective_status(r) == st]
+        if rows:
+            names = ", ".join(f"{r.item.module} › {r.item.name}" for r in rows[:8])
+            untested.append(f"{label} {len(rows)} цэс: {names}"
+                            + (f" … (+{len(rows) - 8}, Test Cases xlsx-ээс)" if len(rows) > 8 else ""))
+    by_cause = (go.get("coverage") or {}).get("by_cause") or {}
+    for cause, n in sorted(by_cause.items(), key=lambda x: -x[1]):
+        if cause not in ("dependent", "na"):
+            untested.append(f"Шалгагдаагүй — {CAUSE_LABEL.get(cause, cause)}: {n}")
     if run.cancelled:
         untested.append("Run хэрэглэгчийн хүсэлтээр зогссон — үлдсэн цэсүүд шалгагдаагүй")
     for kind, keys in (run.resume or {}).items():
@@ -187,18 +195,19 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
             continue
         cnt = Counter(f.get("status") for f in group)
         summary.append(f"{label}: {len(group)} цэс — Pass {cnt.get(M.PASS, 0)}, Fail {cnt.get(M.FAIL, 0)}, "
-                       f"Blocked {cnt.get(M.BLOCKED, 0)}" + (f", N/A {cnt.get(M.NA, 0)}" if cnt.get(M.NA) else "") + "."
+                       f"Blocked {cnt.get(M.BLOCKED, 0)}"
+                       + (f", Шалгагдаагүй {cnt.get(M.NOT_TESTED, 0)}" if cnt.get(M.NOT_TESTED) else "")
+                       + (f", N/A {cnt.get(M.NA, 0)}" if cnt.get(M.NA) else "") + "."
                        + (" Доор зөвхөн Fail цэсүүд." if cnt.get(M.FAIL) else ""))
         # Blocked (шалгаж чадаагүй — bug биш) цэсүүдийг шалтгаанаар нь нэг мөрөнд нэгтгэнэ
         reasons: dict[str, list[str]] = {}
         for fl in group:
-            if fl.get("status") != M.BLOCKED:
+            if fl.get("status") not in (M.BLOCKED, M.NOT_TESTED):
                 continue
-            bad = next((s for s in fl.get("steps") or [] if s["status"] == M.BLOCKED
+            bad = next((s for s in fl.get("steps") or [] if step_effective_status(s) in (M.BLOCKED, M.NOT_TESTED)
                         and s.get("category") not in ("nodata", "na")), None)
             why = re.split(r"\s[—(]", _one_line((bad or {}).get("message") or "шалгаж чадаагүй"))[0].strip()
-            if (bad or {}).get("category") == "tool":
-                why = "хэрэгсэл таньсангүй (сайжруулах) — " + why
+            why = ("Blocked" if fl.get("status") == M.BLOCKED else "Шалгагдаагүй") + " — " + why
             reasons.setdefault(why, []).append(_menu(fl).split(" / ")[-1])
         na = [_menu(fl).split(" / ")[-1] for fl in group
               if any(s.get("category") == "nodata" for s in fl.get("steps") or [])]
@@ -230,7 +239,7 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
             summary.append(f"Шууд форм цэс (жагсаалтгүй — зөвхөн формыг шалгав, засварын шалгалт хамаарахгүй): "
                            f"{len(direct)} цэс ({', '.join(direct[:12])}" + (f" … +{len(direct) - 12}" if len(direct) > 12 else "") + ")")
         for why, names in reasons.items():
-            summary.append(f"Blocked — {why}: {len(names)} цэс ({', '.join(names[:12])}"
+            summary.append(f"{why}: {len(names)} цэс ({', '.join(names[:12])}"
                            + (f" … +{len(names) - 12}" if len(names) > 12 else "") + ")")
         for fl in group:
             if fl.get("status") != M.FAIL:
@@ -292,7 +301,7 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
     bc = go["bug_counts"]
     conds = {c[0]: c for c in go["conditions"]}
     ok = lambda b: "Хангасан" if b else "Хангаагүй"
-    all_exec = s["pending"] == 0 and s["blocked"] == 0
+    all_exec = s["pending"] == 0 and s["blocked"] == 0 and not (go.get("coverage") or {}).get("not_tested")
     go_rows = {
         "pass_rate": f"{s['pass_rate']}% — {ok(conds['Pass Rate'][2])}",
         "critical": f"{bc['critical']} — {ok(conds['Critical Bug'][2])}",
@@ -317,7 +326,13 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
     elif decision == "GO":
         next_steps = ["Production deploy огноог тогтоож PM-д мэдэгдэнэ"] + next_steps
     if s["blocked"]:
-        next_steps.append(f"Blocked болсон {s['blocked']} TC-ийн шалтгааныг арилгаж дахин шалгана")
+        next_steps.append(f"Шалгаж буй систем саад болсон (Blocked) {s['blocked']} TC — сервер/апп талын саадыг "
+                          "хөгжүүлэгчээр арилгуулж дахин шалгана")
+    cov = go.get("coverage") or {}
+    nt_tool = sum(n for c, n in (cov.get("by_cause") or {}).items() if c in ("tool", "operator"))
+    if nt_tool:
+        next_steps.append(f"Хэрэгсэл/тохиргооны шалтгаантай шалгагдаагүй {nt_tool} зүйлийг (хамрах хүрээ "
+                          f"{cov.get('pct', 0)}%) дахин ажиллуулж нөхнө — Blocked биш, апп-ын алдаа биш")
     if not next_steps:
         next_steps = ["Minor bug-уудыг дараагийн sprint-д засварлана"]
 

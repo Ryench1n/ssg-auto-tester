@@ -23,8 +23,23 @@ def stats(tcs: list[TestCase]) -> dict:
             "by_priority": by_prio}
 
 
-def go_no_go(tcs: list[TestCase], bugs: list[Bug], cancelled: bool = False) -> dict:
+def coverage(tcs: list[TestCase], not_tested: list[dict] | None) -> dict:
+    """Хамрах хүрээ: гүйцэтгэсэн TC / (гүйцэтгэсэн + хэрэгсэл/хэрэглэгчийн шалтгаантай шалгагдаагүй). Тест орчны
+    өгөгдөлгүй (data) нь хамрах хүрээнээс хасна (апп-ын тест орчин өөрөө тийм)."""
+    nt = [x for x in (not_tested or []) if x.get("cause") in ("tool", "operator")]
+    by: dict[str, int] = {}
+    for x in not_tested or []:
+        by[x.get("cause") or "tool"] = by.get(x.get("cause") or "tool", 0) + 1
+    done = len(tcs)
+    pct = (done / (done + len(nt)) * 100) if (done + len(nt)) else 0.0
+    return {"tested": done, "not_tested": len(not_tested or []), "by_cause": by, "pct": round(pct, 1),
+            "pct_exact": pct}
+
+
+def go_no_go(tcs: list[TestCase], bugs: list[Bug], cancelled: bool = False, not_tested: list[dict] | None = None,
+             min_coverage: float = 90.0) -> dict:
     s = stats(tcs)
+    cov = coverage(tcs, not_tested)
     crit = sum(1 for b in bugs if b.severity == Severity.CRITICAL)
     major = sum(1 for b in bugs if b.severity == Severity.MAJOR)
     minor = sum(1 for b in bugs if b.severity == Severity.MINOR)
@@ -50,9 +65,18 @@ def go_no_go(tcs: list[TestCase], bugs: list[Bug], cancelled: bool = False) -> d
     if cancelled:
         decision = "INCOMPLETE"
         reasons = ["Run хэрэглэгчийн хүсэлтээр зогссон — бүх цэс шалгагдаагүй тул эцсийн дүгнэлт гаргах боломжгүй"]
+    elif not s["total"]:
+        decision = "INCOMPLETE"
+        reasons = ["Гүйцэтгэсэн TC алга (нэвтрээгүй / бүх зүйл шалгагдаагүй) — дүгнэлт гаргах боломжгүй"]
+    elif cov["pct_exact"] < min_coverage:
+        # Хэрэгслийн шалтгаантай шалгагдаагүй зүйлс Blocked-д тоологдохгүй болсон — тэдгээрийг нуугаад худал GO
+        # гаргахгүйн тулд хамрах хүрээ доогуур бол дүгнэлт гаргахгүй
+        decision = "INCOMPLETE"
+        reasons = reasons + [f"Хамрах хүрээ {cov['pct']}% < {min_coverage:g}% — {cov['not_tested']} зүйл шалгагдаагүй "
+                             "(хэрэгсэл/хэрэглэгчийн шалтгаан) тул эцсийн дүгнэлт гаргах боломжгүй"]
     else:
         decision = "GO" if not reasons else "NO-GO"
-    return {"decision": decision, "reasons": reasons, "conditions": conds, "stats": s,
+    return {"decision": decision, "reasons": reasons, "conditions": conds, "stats": s, "coverage": cov,
             "bug_counts": {"critical": crit, "major": major, "minor": minor, "total": len(bugs)}}
 
 

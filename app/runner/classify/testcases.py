@@ -10,6 +10,7 @@ from app.runner.severity import Severity
 from app.runner.classify.signature import _url_pattern, first_exception_line
 from app.runner.classify.severity import FLOW_EXPECTED, FORM_STEPS
 from app.runner.classify.modules import ModuleCoder
+from app.runner.classify.cause import cause_of, status_for
 
 
 # --------------------------------------------------------------------------
@@ -56,24 +57,25 @@ def build_test_cases(run: RunData, cfg: dict, executor: str, date: str) -> tuple
     elif run.login_ok:
         login_result, login_note = M.PASS, "Амжилттай нэвтэрсэн (гараар)"
     elif run.login_timeout:
-        # Хэрэглэгч хугацаандаа гараар нэвтрээгүй — аппын алдаа биш тул bug үүсгэхгүй
-        login_result, login_note = M.BLOCKED, f"Шалгагдаагүй: {run.login_error}"
+        # Хэрэглэгч хугацаандаа гараар нэвтрээгүй — апп талын саад БИШ (Blocked биш): шалгагдаагүй, TC үүсгэхгүй
+        login_result, login_note = M.NOT_TESTED, f"Шалгагдаагүй: {run.login_error}"
     else:
         login_result, login_note = M.FAIL, f"Нэвтэрч чадсангүй: {run.login_error}"
     if run.app_version:
         login_note += f" (хувилбар {run.app_version})"
-    tcs.append(TestCase(
-        "TC-LOGIN-001", "SMOKE-LOGIN", "Хэрэглэгч гараар нэвтэрч апп нээгдэх",
-        "Хэрэглэгч бүртгэлтэй; нэвтрэх хуудас нээлттэй",
-        "1. /auth/login очих\n2. Хэрэглэгч нээгдсэн хөтөч дээр нэвтрэх нэр, нууц үгээ өөрөө оруулах\n"
-        "3. Нэвтрэх дарах",
-        "/greeting руу шилжиж, модулийн цэс харагдах", "Automated", Severity.CRITICAL.xlsx, auto,
-        login_result, executor, date, note=login_note, module="LOGIN",
-        menu_key="__login__"))
+    if login_result != M.NOT_TESTED:
+        tcs.append(TestCase(
+            "TC-LOGIN-001", "SMOKE-LOGIN", "Хэрэглэгч гараар нэвтэрч апп нээгдэх",
+            "Хэрэглэгч бүртгэлтэй; нэвтрэх хуудас нээлттэй",
+            "1. /auth/login очих\n2. Хэрэглэгч нээгдсэн хөтөч дээр нэвтрэх нэр, нууц үгээ өөрөө оруулах\n"
+            "3. Нэвтрэх дарах",
+            "/greeting руу шилжиж, модулийн цэс харагдах", "Automated", Severity.CRITICAL.xlsx, auto,
+            login_result, executor, date, note=login_note, module="LOGIN",
+            menu_key="__login__"))
 
     min_min = int((cfg.get("session") or {}).get("min_session_minutes", 20))
     if not run.login_ok:
-        s_res, s_note = M.BLOCKED, "Нэвтэрч чадаагүй тул шалгах боломжгүй"
+        s_res, s_note = M.NOT_TESTED, "Нэвтэрч чадаагүй тул шалгах боломжгүй"
     elif run.logouts:
         first = run.logouts[0]
         s_res = M.FAIL
@@ -87,7 +89,7 @@ def build_test_cases(run: RunData, cfg: dict, executor: str, date: str) -> tuple
                   "logout ажиглагдаагүй ч бүрэн баталгаажаагүй")
     # Smoke-гүй богино run (ж: 2 минутын бизнес процессын E2E): {min_min} минутын session шалгах боломжгүй —
     # «Pending» нь Pass Rate-ийг хиймлээр унагаж NO-GO болгодог байсан (testaccounting P1, 2026-10-19) → хамаарахгүй
-    skip_session = s_res == M.PENDING and not getattr(run, "smoke_ran", bool(run.results))
+    skip_session = (s_res == M.PENDING and not getattr(run, "smoke_ran", bool(run.results))) or s_res == M.NOT_TESTED
     if not skip_session:
         tcs.append(TestCase(
             "TC-LOGIN-002", "SMOKE-LOGIN", f"Session {min_min}+ минут тасрахгүй байх",
@@ -99,6 +101,8 @@ def build_test_cases(run: RunData, cfg: dict, executor: str, date: str) -> tuple
     counters: dict[str, int] = {}
     for r in run.results:
         it = r.item
+        if item_effective_status(r) == M.NOT_TESTED:
+            continue            # хэрэгсэл/тохиргоо/хэрэглэгчийн шалтгаантай шалгагдаагүй — TC биш (not_tested_items-д)
         code = coder.code(it.module)
         counters[code] = counters.get(code, 0) + 1
         tc_id = f"TC-{code}-{counters[code]:03d}"
@@ -143,10 +147,10 @@ def build_test_cases(run: RunData, cfg: dict, executor: str, date: str) -> tuple
             if root is not None:
                 not_run[root] = not_run.get(root, 0) + 1
         for s in fl.get("steps") or []:
-            if s.get("status") == M.BLOCKED and s.get("category") == "na":
-                continue        # хамаарахгүй (ж: заавал талбаргүй формын сөрөг тест) — TC/тооцоонд орохгүй
             if dependent_root(s, fl.get("steps") or []) is not None:
                 continue        # ажиллаагүй (өмнөх алхмаас хамаарсан) — эх алхмын TC-д тоологдоно
+            if step_effective_status(s) == M.NOT_TESTED:
+                continue        # апп талын саад биш (хэрэгсэл, өгөгдөл, хэрэглэгч, N/A) — TC биш, not_tested_items-д
             args = json.dumps(s.get("args") or {}, ensure_ascii=False)
             pre = f"Нэвтэрсэн (гараар); run_tag={fl.get('run_tag', '')}"
             if s.get("requires"):
@@ -185,9 +189,9 @@ def _form_tcs(fl: dict, executor: str, date: str, auto: str) -> list[TestCase]:
     parts = path.split(" / ")
     out = []
     for s in fl.get("steps") or []:
-        if s.get("category") in ("nodata", "na"):
-            continue            # тест орчинд өгөгдөлгүй — гүйцэтгээгүй (N/A), тооцоонд орохгүй («Тестлээгүй хэсгүүд»-д)
-        tool = "[Хэрэгсэл таньсангүй] " if s.get("category") == "tool" else ""
+        if s.get("category") in ("nodata", "na") or step_effective_status(s) == M.NOT_TESTED:
+            continue            # шалгагдаагүй (өгөгдөлгүй / хэрэгсэл таньсангүй / N/A) — TC биш, not_tested_items-д
+        tool = ""
         out.append(TestCase(
             tc_id=f"TC-FORM-{fl.get('code') or 'F'}-{s['index']:03d}",
             req_ref=f"FORM-{fl.get('code') or 'F'}",
@@ -209,9 +213,61 @@ def _form_tcs(fl: dict, executor: str, date: str, auto: str) -> list[TestCase]:
     return out
 
 
+def step_effective_status(s: dict) -> str:
+    """Алхмын TC-ийн төлөв: Blocked нь зөвхөн апп талын нотолгоотой саад; хуучин (шалтгаангүй) raw.json-ийн Blocked-ийг
+    ч мөн шалтгаанаар нь дахин ангилна."""
+    st = s.get("status")
+    if st == M.NOT_TESTED:
+        return M.NOT_TESTED
+    if st != M.BLOCKED:
+        return st
+    if s.get("cause"):
+        return M.BLOCKED if s["cause"] == "app" else M.NOT_TESTED
+    return status_for(s.get("category") or "", s.get("message") or "")[0]
+
+
+def item_effective_status(r) -> str:
+    """Smoke цэсийн TC-ийн төлөв (хуучин Blocked-ийг шалтгаанаар нь)."""
+    if r.status == M.NOT_TESTED:
+        return M.NOT_TESTED
+    if r.status != M.BLOCKED:
+        return r.status
+    if getattr(r, "cause", ""):
+        return M.BLOCKED if r.cause == "app" else M.NOT_TESTED
+    return status_for("", r.blocked_reason or "")[0]
+
+
+def not_tested_items(run: RunData) -> list[dict]:
+    """Шалгагдаагүй зүйлс (TC болоогүй) шалтгаантай нь — тайлангийн «Шалгагдаагүй» хэсэг, хамрах хүрээний тооцоонд.
+    [{kind: smoke|flow|form|auto, name, step, cause, message, screenshot}] — хамааралтай (dependent) алхмуудыг оруулахгүй."""
+    out: list[dict] = []
+    for r in run.results:
+        if item_effective_status(r) == M.NOT_TESTED:
+            out.append({"kind": "smoke", "name": f"{r.item.module} › {r.item.name}", "step": "",
+                        "cause": r.cause or cause_of("", r.blocked_reason or ""), "message": r.blocked_reason,
+                        "screenshot": r.screenshot})
+    for fl in run.flows:
+        meta = fl.get("meta") or {}
+        if meta.get("setup"):
+            continue
+        kind = "form" if meta.get("formcheck") else "auto" if meta.get("auto") else "flow"
+        steps = fl.get("steps") or []
+        for s in steps:
+            if dependent_root(s, steps) is not None or step_effective_status(s) != M.NOT_TESTED:
+                continue
+            cause = s.get("cause") or cause_of(s.get("category") or "", s.get("message") or "")
+            if cause in ("dependent", "na"):
+                continue
+            out.append({"kind": kind, "name": meta.get("menu") or fl["flow"], "step": s.get("name", ""),
+                        "cause": cause, "message": s.get("message") or "", "screenshot": s.get("screenshot") or ""})
+            if meta.get("skipped"):
+                break           # автоматаар шалгаж чадаагүй урсгал — эхний шалтгаан л
+    return out
+
+
 def dependent_root(step: dict, steps: list[dict]) -> int | None:
     """Алхам өмнөх алхмаас хамаарч ажиллаагүй бол эх (анх амжилтгүй болсон) алхмын дугаар, үгүй бол None."""
-    if step.get("status") != M.BLOCKED:
+    if step.get("status") not in (M.BLOCKED, M.NOT_TESTED):
         return None
     msg = step.get("message") or ""
     m = re.match(r"Өмнөх алхам #(\d+)", msg)
@@ -221,7 +277,7 @@ def dependent_root(step: dict, steps: list[dict]) -> int | None:
         # Эх алхам мөн хамааралтай бол түүний эх рүү (гинжин)
         return (dependent_root(prev, steps) or idx) if prev is not None else idx
     if msg.startswith("Шаардлагатай өгөгдөл алга"):
-        first = next((s for s in steps if s.get("status") in (M.FAIL, M.BLOCKED)
+        first = next((s for s in steps if s.get("status") in (M.FAIL, M.BLOCKED, M.NOT_TESTED)
                       and not (s.get("message") or "").startswith(("Өмнөх алхам", "Шаардлагатай өгөгдөл алга"))), None)
         return first.get("index") if first is not None else None
     return None

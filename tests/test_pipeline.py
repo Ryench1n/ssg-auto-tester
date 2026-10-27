@@ -128,7 +128,7 @@ def test_shared_context_and_data_handoff(full):
     assert cust["data"]["customer"] == f"{d.run_tag} Pipeline харилцагч"
     assert cust["data"]["customer_code"].startswith("C-")
     # Нэг flow унасан ч дараагийн flow ажилласан; дотор нь Fail → дараагийн алхам Blocked
-    assert [s["status"] for s in broken["steps"]] == [M.FAIL, M.BLOCKED]
+    assert [s["status"] for s in broken["steps"]] == [M.FAIL, M.NOT_TESTED]
     srv = full["srv"]
     assert srv.state.created - full["before"][1] == 1 and srv.state.deleted - full["before"][2] == 1
     assert not any(d.run_tag in c["name"] for c in srv.state.customers)
@@ -209,10 +209,10 @@ def test_session_lost_timeout_blocks_remaining(srv, tmp_path):
         overrides={"timing": {**FAST["timing"], "manual_login_timeout_ms": 2000, "relogin_timeout_ms": 2000}})
     d = asyncio.run(pipe.run())
     a, b = d.flows
-    assert [s["status"] for s in a["steps"]] == [M.PASS, M.PASS, M.BLOCKED]
-    assert [s["status"] for s in b["steps"]] == [M.BLOCKED]
+    assert [s["status"] for s in a["steps"]] == [M.PASS, M.PASS, M.NOT_TESTED]
+    assert [s["status"] for s in b["steps"]] == [M.NOT_TESTED]
     assert "дахин нэвтрээгүй" in a["steps"][2]["message"]
-    assert [p["status"] for p in d.pipeline] == [M.PASS, M.BLOCKED, M.BLOCKED]
+    assert [p["status"] for p in d.pipeline] == [M.PASS, M.NOT_TESTED, M.NOT_TESTED]
     assert not d.cancelled and any(t == "session_lost" for t, _ in events)
 
 

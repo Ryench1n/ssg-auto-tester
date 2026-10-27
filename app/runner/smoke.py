@@ -19,6 +19,7 @@ from app.models import Finding, ItemResult, MenuItem, RunData, TimelineEvent
 from app.runner import discovery
 from app.runner.capabilities import scan_actions
 from app.runner.classify import bug_candidates, signature
+from app.runner.classify.cause import status_for
 from app.runner.detectors import tab_mismatch_finding, DIALOGS_FN, Collector, classify_popup, names_match, snapshot, strip_query
 from app.runner.runlog import RunLog, now_iso
 from app.runner.session import is_login_url, wait_login_or_app
@@ -113,12 +114,20 @@ TOAST_JS = r"""
 """
 
 
+def classify_item(r: ItemResult) -> None:
+    """Blocked цэсийг шалтгаанаар нь: апп талын нотолгоотой саад л Blocked, бусад (хэрэгсэл, тохиргоо, session) —
+    «Шалгагдаагүй» (classify/cause.py)."""
+    if r.status == M.BLOCKED:
+        r.status, r.cause = status_for("", r.blocked_reason or "")
+
+
 def smoke_status(r: ItemResult, cfg: dict) -> str:
     """Цэсийн төлөв. «Зөөлөн» илрэл (Minor консол алдаа, тохиргооны анхааруулга, удаан ачаалал) нь Fail биш —
     цэс ажиллаж байгаа тул Pass + анхааруулга (bug-ийн жагсаалтад Minor болж үлдэнэ). HR: 25 Fail-ын 20 нь
     ийм байж, NO-GO шийдвэрийг дуу чимээ тодорхойлж байсан."""
     if r.blocked_reason:
-        return M.BLOCKED
+        st, r.cause = status_for("", r.blocked_reason)
+        return st
     soft = set((cfg.get("detect") or {}).get("soft_findings")
                or [M.CONSOLE_ERROR, M.WARNING_TOAST, M.SLOW_LOAD, M.TAB_NAME_MISMATCH])
     if any(f.kind not in soft for f in r.findings):
@@ -146,7 +155,7 @@ class SmokeRunner:
         self.page = None
         self.col: Collector | None = None
         self.current_module: str | None = None
-        self.counts = {M.PASS: 0, M.FAIL: 0, M.BLOCKED: 0}
+        self.counts = {M.PASS: 0, M.FAIL: 0, M.BLOCKED: 0, M.NOT_TESTED: 0}
         self._seen_href: dict[str, ItemResult] = {}   # href → анх шалгасан үр дүн (давхардсан цэс)
         self.last_error = ""
         self._shot_seq = 0
@@ -268,9 +277,11 @@ class SmokeRunner:
                 if self.session.lost:
                     # Session тасарч дахин нэвтрээгүй → үлдсэн цэсүүд Blocked (шалгагдаагүй)
                     for rest in ordered[i - 1:]:
-                        self.data.results.append(ItemResult(rest, status=M.BLOCKED, checked_at=now_iso(),
-                                                            blocked_reason=self.session.lost_reason[:150]))
-                        self.counts[M.BLOCKED] += 1
+                        lost = ItemResult(rest, status=M.BLOCKED, checked_at=now_iso(),
+                                          blocked_reason=self.session.lost_reason[:150])
+                        classify_item(lost)
+                        self.data.results.append(lost)
+                        self.counts[lost.status] = self.counts.get(lost.status, 0) + 1
                 else:
                     self.data.cancelled = True
                     self.log("Хэрэглэгч зогсоолоо", "warn")
@@ -285,7 +296,8 @@ class SmokeRunner:
                                    "дахин шалгаагүй"] + list(orig.notes))
             else:
                 r = await self._check_item(item)
-                if item.href and r.status != M.BLOCKED:
+                classify_item(r)
+                if item.href and r.status not in (M.BLOCKED, M.NOT_TESTED):
                     self._seen_href[item.href] = r
             item_s = time.monotonic() - t_item
             self.data.results.append(r)
@@ -309,9 +321,10 @@ class SmokeRunner:
                 p = sum(1 for r in rs if r.status == M.PASS)
                 f = sum(1 for r in rs if r.status == M.FAIL)
                 bl = sum(1 for r in rs if r.status == M.BLOCKED)
+                nt = sum(1 for r in rs if r.status == M.NOT_TESTED)
                 self.data.timeline.append(TimelineEvent(
                     max(r.checked_at for r in rs), f"«{mod}» модулийн smoke тест ({len(rs)} цэс)",
-                    f"Pass {p} / Fail {f}" + (f" / Blocked {bl}" if bl else "")))
+                    f"Pass {p} / Fail {f}" + (f" / Blocked {bl}" if bl else "") + (f" / Шалгагдаагүй {nt}" if nt else "")))
 
         # 6. Давтан баталгаажуулалт
         if self.opt.confirm_failures and not self.cancel_event.is_set():
@@ -541,19 +554,25 @@ class SmokeRunner:
                 await self._ensure_ready(item.name)
                 r, flags = await asyncio.wait_for(self._check_once(item, attempt, deploy_retried), timeout)
             except asyncio.TimeoutError:
+                # Хэрэгслийн шалгалтын хугацаа хэтэрсэн — апп удаан гэсэн НОТОЛГОО биш (ачаалал гацсаныг LOADING_STUCK
+                # тусад нь илрүүлдэг): сэргээгээд 1 удаа дахин шалгана; хоёр дахь удаа ч бол «шалгагдаагүй (хэрэгсэл)»
                 r = ItemResult(item, status=M.BLOCKED, attempts=attempt, checked_at=now_iso(),
-                               blocked_reason=f"Timeout ({timeout} сек)")
-                r.findings.append(Finding(M.TIMEOUT, f"Цэсийн шалгалт {timeout} сек-д дууссангүй"))
+                               blocked_reason=f"Хэрэгслийн шалгалтын хугацаа хэтэрсэн ({timeout} сек)")
                 r.screenshot = await self._screenshot(self._shot_name())
                 flags = _Flags()
                 await self._recover_after_timeout(item)
+                if attempt < 2 and not self.cancel_event.is_set():
+                    self.log(f"{item.name}: шалгалтын хугацаа хэтэрсэн — сэргээгээд дахин шалгана", "warn", to_ui=False)
+                    continue
                 break
             except Exception as e:
                 self.log(f"Шалгалтын алдаа ({item.name}): {e!r}", "warn")
                 r = ItemResult(item, status=M.BLOCKED, attempts=attempt, checked_at=now_iso(),
-                               blocked_reason=f"Шалгалтын алдаа: {str(e)[:150]}")
+                               blocked_reason=f"Хэрэгслийн шалгалтын алдаа: {str(e)[:150]}")
                 flags = _Flags()
                 await self._recover_after_timeout(item)
+                if attempt < 2 and not self.cancel_event.is_set():
+                    continue          # хэрэгслийн түр алдаа — сэргээгээд 1 удаа дахин
                 break
             if flags.logout:
                 await self._relogin(item.name)
@@ -569,6 +588,11 @@ class SmokeRunner:
                 deploy_retried = True
                 await self._sleep(self.cfg["timing"]["deploy_retry_wait_ms"] / 1000)
                 attempt -= 1      # энэ оролдлогыг тоолохгүй
+                continue
+            if (r.status == M.BLOCKED and (r.blocked_reason or "").startswith("Цэс олдсонгүй") and attempt < 2
+                    and not self.cancel_event.is_set()):
+                # Цэсний мод түр зурагдаагүй (апп ачаалал, өмнөх цэсийн үлдэгдэл) — дахин ачаалж 1 удаа дахин хайна
+                await self._recover_after_timeout(item)
                 continue
             break
         assert r is not None
