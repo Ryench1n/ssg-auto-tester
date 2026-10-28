@@ -117,7 +117,8 @@ async def auto_cleanup(env, args: dict) -> dict:
     from app.flows.steps.crud import crud_delete
     p = str(args["data"])
     tag = env.ctx.run_tag
-    texts = list(dict.fromkeys(str(t) for t in (env.ctx.data.get(f"{p}_rec"), env.ctx.data.get(f"{p}_try"))
+    texts = list(dict.fromkeys(str(t) for t in (env.ctx.data.get(f"{p}_rec"), env.ctx.data.get(f"{p}_try"),
+                                                env.ctx.data.get(f"{p}_edit"))
                                if t and tag in str(t)))
     if not texts:
         raise StepBlocked("Бүртгэл хадгалах хүртэл явагдаагүй — цэвэрлэх өгөгдөл алга (хамаарахгүй)", category="na")
@@ -140,6 +141,11 @@ async def auto_cleanup(env, args: dict) -> dict:
             cleaned.append(text)
         except StepFailed as e:
             left.append(f"{text.replace(tag, '{run_tag}')}: {str(e)[:200]}")
+    edit = env.ctx.data.get(f"{p}_edit")
+    if edit in cleaned and saved != edit:
+        # Засварын нэрээр олдож устгагдсан — анхны нэр «олдсонгүй» нь үлдэгдэл биш
+        gone = f"{str(saved).replace(tag, '{run_tag}')}: хадгалсан ч жагсаалтаас олдсонгүй"
+        left = [x for x in left if not x.startswith(gone)]
     if cleaned:
         env.run.meta["cleaned"] = [t.replace(tag, "{run_tag}") for t in cleaned]
         failed_before = any(s.status != "Pass" and s.category not in ("na",) for s in env.run.steps[:-1])

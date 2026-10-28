@@ -157,3 +157,30 @@ def test_saved_but_invisible_record_is_not_a_bug():
     other = [{"index": 1, "uses": "crud.auto_create", "status": M.FAIL, "message": "Системийн алдаа"},
              {"index": 2, "uses": "crud.search", "status": M.FAIL, "message": "мөр олдсонгүй"}]
     assert not reclassify_invisible_record(other) and other[1]["status"] == M.FAIL
+
+
+def test_update_outcomes_reclassified():
+    """testhr 2026-10-28: засварын анхааруулга (A165) Major bug болж, засвар хадгалахад алдаа гарсны дараах
+    устгалын «мөр олдсонгүй» (A20) давхар Major bug болж байсан."""
+    from app.pipeline.stages import reclassify_update_outcomes
+    warn = [
+        {"index": 1, "uses": "crud.auto_create", "status": M.PASS, "message": ""},
+        {"index": 3, "uses": "crud.auto_update", "status": M.FAIL,
+         "message": "Хадгалахад: баталгаажуулалтын анхааруулга — Анхаар\nМэдээлэл хоосон байна!"},
+        {"index": 4, "uses": "crud.auto_verify", "status": M.NOT_TESTED, "message": "Өмнөх алхам #3 (Автомат засвар) Fail"},
+    ]
+    assert reclassify_update_outcomes(warn)
+    assert warn[1]["status"] == M.NOT_TESTED and warn[1]["cause"] == "tool"
+    assert warn[2]["message"].endswith("Шалгагдаагүй")
+    err = [
+        {"index": 3, "uses": "crud.auto_update", "status": M.FAIL,
+         "message": "Хадгалахад: Cистемийн алдаа\nInvalid column name 'TemplateType'."},
+        {"index": 5, "uses": "crud.delete", "status": M.FAIL, "message": "'T A20 автомат тест' агуулсан мөр олдсонгүй"},
+    ]
+    assert reclassify_update_outcomes(err)
+    assert err[0]["status"] == M.FAIL                      # серверийн алдаа — бодит bug хэвээр
+    assert err[1]["status"] == M.NOT_TESTED and cause_of("", err[1]["message"]) == "dependent"
+    # Засварыг НЭЭХЭД алдаа (хадгалаагүй) — устгал «олдсонгүй» бол бие даасан Fail хэвээр
+    opened = [{"index": 3, "uses": "crud.auto_update", "status": M.FAIL, "message": "Бичлэгийг засахаар нээхэд: x"},
+              {"index": 5, "uses": "crud.delete", "status": M.FAIL, "message": "мөр олдсонгүй"}]
+    assert not reclassify_update_outcomes(opened) and opened[1]["status"] == M.FAIL

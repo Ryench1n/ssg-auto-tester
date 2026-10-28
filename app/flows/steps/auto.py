@@ -812,10 +812,17 @@ async def auto_update(env, args: dict) -> dict:
         uid = _uid(args)
         new = f"{tag} {uid} автомат засвар" if uid else f"{tag} автомат засвар"
         await ui.fill_field(env, field, new)
+        # Хадгалахад алдаа гарсан ч нэр нь өөрчлөгдсөн байж болзошгүй — цэвэрлэгээ хоёр нэрээр хайна
+        env.ctx.data[f"{str(args['save_as']).removesuffix('_rec')}_edit"] = new
         await ui.save_form(env, ui.buttons(env, "save"))
-    except StepFailed:
+    except StepFailed as e:
         await ui.close_form(env)
         await _close_form_tabs(env, tabs_before)
+        if (not isinstance(e, StepBlocked) and e.findings and all(f.kind == M.WARNING_TOAST for f in e.findings)
+                and str(e).startswith("Хадгалахад")):
+            # Бүртгэх үеийнхтэй адил: зөвхөн баталгаажуулалтын анхааруулга — апп-ын алдааны нотолгоо биш
+            raise StepBlocked(f"Автомат засварыг систем хүлээж авсангүй (баталгаажуулалтын анхааруулга) — апп-ын "
+                              f"алдаа гэх нотолгоогүй, гараар шалгана уу: {e}", e.findings, category="tool") from None
         raise
     await _close_form_tabs(env, tabs_before)
     env.run.meta["edit_value"] = new.replace(tag, "{run_tag}")

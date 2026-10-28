@@ -147,6 +147,45 @@ def reclassify_invisible_record(steps) -> bool:
     return True
 
 
+UPDATE_REJECTED_PREFIX = "Автомат засварыг систем хүлээж авсангүй"
+
+
+def reclassify_update_outcomes(steps) -> bool:
+    """Автомат CRUD-ийн засварын (crud.auto_update) үр дагаврыг зөв ангилна (testhr 2026-10-28):
+    • засварыг хадгалахад зөвхөн баталгаажуулалтын АНХААРУУЛГА (ж: «Мэдээлэл хоосон байна!») — бүртгэх үеийнхтэй адил
+      автоматаар таасан утгыг систем хүлээж аваагүй, апп-ын алдааны нотолгоо биш → Шалгагдаагүй (tool);
+    • засварыг хадгалахад алдаа гарсны дараа устгал «мөр олдсонгүй» — бичлэгийн нэр хагас өөрчлөгдсөн байж болзошгүй,
+      засварын алдааны үр дагавар (давхар Major bug биш) → Шалгагдаагүй (dependent). Өөрчилсөн бол True."""
+    upd = next((s for s in steps if _sg(s, "uses") == "crud.auto_update"), None)
+    if upd is None:
+        return False
+    changed = False
+    msg = _sg(upd, "message") or ""
+    if _sg(upd, "status") == M.FAIL and msg.startswith("Хадгалахад: баталгаажуулалтын анхааруулга"):
+        _ss(upd, "status", M.NOT_TESTED)
+        _ss(upd, "cause", "tool")
+        _ss(upd, "category", "tool")
+        _ss(upd, "message", f"{UPDATE_REJECTED_PREFIX} (баталгаажуулалтын анхааруулга) — апп-ын алдаа гэх нотолгоогүй, "
+                            f"гараар шалгана уу: {msg}"[:500])
+        n = _sg(upd, "index")
+        for s in steps:
+            m = _sg(s, "message") or ""
+            if m.startswith(f"Өмнөх алхам #{n} (") and m.endswith(") Fail"):
+                _ss(s, "message", m[:-len("Fail")] + "Шалгагдаагүй")
+        changed = True
+    if _sg(upd, "status") == M.FAIL and msg.startswith("Хадгалахад"):
+        for s in steps:
+            m = _sg(s, "message") or ""
+            if (_sg(s, "uses") == "crud.delete" and _sg(s, "status") == M.FAIL and "мөр олдсонгүй" in m
+                    and _sg(s, "index") > _sg(upd, "index")):
+                _ss(s, "status", M.NOT_TESTED)
+                _ss(s, "cause", "dependent")
+                _ss(s, "message", f"Өмнөх алхам #{_sg(upd, 'index')} (Автомат засвар) — засварыг хадгалахад алдаа "
+                                  f"гарсан тул бичлэгийн нэр өөрчлөгдсөн байж болзошгүй, устгах мөрийг олсонгүй: {m}"[:500])
+                changed = True
+    return changed
+
+
 def page_stem(name: str) -> str:
     """Хуудас/route-ийн үндэс: «OrganizationForm», «organizationlist» → «organization» (жагсаалт ба форм нэг цэс)."""
     return re.sub(r"(list|form|page|view|grid|detail|edit)+$", "", name.lower()) or name.lower()
@@ -535,6 +574,9 @@ class AutoCrudStage(Stage):
         if reclassify_invisible_record(run.steps):
             pipe.runlog.log(f"Автомат CRUD: «{menu_path(item)}» — хадгалсан бичлэг жагсаалтад харагдсангүй "
                             "(шүүлтүүр/баримтын төрөл) — Шалгагдаагүй, bug биш", "warn")
+        if reclassify_update_outcomes(run.steps):
+            pipe.runlog.log(f"Автомат CRUD: «{menu_path(item)}» — засварын үр дагаврыг дахин ангилав "
+                            "(анхааруулга / нэр өөрчлөгдсөн) — Шалгагдаагүй", "warn")
         try:
             await ui.close_form(eng)          # дараагийн цэсэнд нээлттэй форм/цонх саад болохгүй
             await ui.clear_toasts(eng)        # хуучин анхааруулгын toast дараагийн цэсийг Fail болгохгүй

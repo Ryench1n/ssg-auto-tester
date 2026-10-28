@@ -83,9 +83,11 @@ def load_run(raw_path: Path) -> M.RunData:
     for r in results:
         if not r.cause:
             classify_item(r)
-    from app.pipeline.stages import reclassify_invisible_record
+    from app.pipeline.stages import reclassify_invisible_record, reclassify_update_outcomes
     for f in d.get("flows") or []:
-        changed = bool((f.get("meta") or {}).get("auto")) and reclassify_invisible_record(f.get("steps") or [])
+        auto = bool((f.get("meta") or {}).get("auto"))
+        changed = auto and reclassify_invisible_record(f.get("steps") or [])
+        changed = (auto and reclassify_update_outcomes(f.get("steps") or [])) or changed
         for s in f.get("steps") or []:
             if s.get("status") == M.BLOCKED and not s.get("cause"):
                 s["status"], s["cause"] = status_for(s.get("category") or "", s.get("message") or "")
