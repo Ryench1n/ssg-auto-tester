@@ -104,6 +104,49 @@ def auto_tool_transient(run) -> bool:
                 and not any(p in (first.message or "") for p in BROWSER_GONE))
 
 
+def _sg(s, k):
+    return s.get(k) if isinstance(s, dict) else getattr(s, k, None)
+
+
+def _ss(s, k, v) -> None:
+    if isinstance(s, dict):
+        s[k] = v
+    else:
+        setattr(s, k, v)
+
+
+INVISIBLE_PREFIX = "Хадгалсан бичлэг энэ жагсаалтад харагдсангүй"
+
+
+def reclassify_invisible_record(steps) -> bool:
+    """Автомат CRUD: бүртгэл алдаагүй хадгалагдсан (#1 Pass) ч өөрийн жагсаалтаас олдоогүй (#2 «мөр олдсонгүй») нь
+    апп-ын bug гэх НОТОЛГОО биш — жагсаалтын анхдагч шүүлтүүр (огноо/төлөв) эсвэл хэрэгслийн сонгосон баримтын төрөл
+    энэ жагсаалтад харагддаггүй (testaccounting 2026-10-28: ДҮ-ийн 5 баримт «ДҮ-ийн баримтын жагсаалт»-аас олдож
+    устгагдсан ч 10 худал Major bug, «Устгах — мөр олдсонгүй» давхар). → Шалгагдаагүй (tool); устгалын «олдсонгүй» нь
+    түүний үр дагавар. Үлдэгдлийн анхааруулга (гараар шалгах) хэвээр үлдэнэ. Өөрчилсөн бол True."""
+    by = {_sg(s, "index"): s for s in steps}
+    first, search = by.get(1), by.get(2)
+    if not (first is not None and search is not None and _sg(first, "uses") == "crud.auto_create"
+            and _sg(first, "status") == M.PASS and _sg(search, "uses") == "crud.search"
+            and _sg(search, "status") == M.FAIL and "мөр олдсонгүй" in (_sg(search, "message") or "")):
+        return False
+    _ss(search, "status", M.NOT_TESTED)
+    _ss(search, "cause", "tool")
+    _ss(search, "category", "tool")
+    _ss(search, "message", f"{INVISIBLE_PREFIX} (жагсаалтын шүүлтүүр / баримтын төрөл) — апп-ын алдаа гэх нотолгоогүй, "
+                           f"засвар/устгалыг шалгаж чадсангүй: {_sg(search, 'message')}"[:500])
+    for s in steps:
+        msg = _sg(s, "message") or ""
+        if _sg(s, "uses") == "crud.delete" and _sg(s, "status") == M.FAIL and "мөр олдсонгүй" in msg:
+            _ss(s, "status", M.NOT_TESTED)
+            _ss(s, "cause", "dependent")
+            _ss(s, "message", f"Өмнөх алхам #2 (Бүртгэснээ хайж олох) — бичлэг жагсаалтад харагдаагүй тул устгаж "
+                              f"чадсангүй: {msg}"[:500])
+        elif msg.startswith("Өмнөх алхам #2 (") and msg.endswith(") Fail"):
+            _ss(s, "message", msg[:-len("Fail")] + "Шалгагдаагүй")
+    return True
+
+
 def page_stem(name: str) -> str:
     """Хуудас/route-ийн үндэс: «OrganizationForm», «organizationlist» → «organization» (жагсаалт ба форм нэг цэс)."""
     return re.sub(r"(list|form|page|view|grid|detail|edit)+$", "", name.lower()) or name.lower()
@@ -489,6 +532,9 @@ class AutoCrudStage(Stage):
                     if st.status == M.FAIL or (st.status == M.NOT_TESTED and st.cause == "tool"):
                         st.status, st.category, st.cause = M.BLOCKED, "infra", "app"
                         st.message = f"Тест орчин хариу өгөөгүй (дахин ачаалсан ч): {st.message}"[:500]
+        if reclassify_invisible_record(run.steps):
+            pipe.runlog.log(f"Автомат CRUD: «{menu_path(item)}» — хадгалсан бичлэг жагсаалтад харагдсангүй "
+                            "(шүүлтүүр/баримтын төрөл) — Шалгагдаагүй, bug биш", "warn")
         try:
             await ui.close_form(eng)          # дараагийн цэсэнд нээлттэй форм/цонх саад болохгүй
             await ui.clear_toasts(eng)        # хуучин анхааруулгын toast дараагийн цэсийг Fail болгохгүй

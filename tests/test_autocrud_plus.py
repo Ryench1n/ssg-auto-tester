@@ -264,7 +264,10 @@ def test_saved_but_invisible_record_is_not_reported_clean(deps_run):
     """Хадгалсан бичлэг жагсаалтаас олдохгүй бол цэвэрлэгээ «үлдээгүй» гэж худал хэлэхгүй — гараар шалгуулна."""
     g = deps_run["by"][GHOST]
     st = {s["index"]: s for s in g["steps"]}
-    assert st[1]["status"] == M.PASS and st[2]["status"] == M.FAIL
+    # Алдаагүй хадгалсан ч жагсаалтад харагдаагүй — апп-ын bug гэх нотолгоогүй: Fail/bug биш, Шалгагдаагүй (tool)
+    assert st[1]["status"] == M.PASS and st[2]["status"] == M.NOT_TESTED and st[2]["cause"] == "tool", steps_of(g)
+    assert not any(s["status"] == M.FAIL for s in g["steps"]), steps_of(g)
+    assert not any(g["code"] in " ".join(b["tcs"]) for b in deps_run["summary"]["bugs"])
     assert st[7]["status"] == M.NOT_TESTED and "гараар шалгана уу" in st[7]["message"], steps_of(g)
     assert any(x["menu"].endswith("Үл харагдах жагсаалт") for x in deps_run["summary"]["leftovers"])
 

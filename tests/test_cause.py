@@ -136,3 +136,24 @@ def test_rebuild_reclassifies_legacy_blocked(tmp_path):
     run = load_run(p)
     assert [r.status for r in run.results] == [M.NOT_TESTED, M.BLOCKED]
     assert run.flows[0]["status"] == M.NOT_TESTED and run.flows[0]["steps"][0]["cause"] == "tool"
+
+
+def test_saved_but_invisible_record_is_not_a_bug():
+    """testaccounting 2026-10-28: ДҮ-ийн баримт алдаагүй хадгалагдаж өөр жагсаалтаас олдсон ч хайлт + устгал хоёр
+    Major bug болж байсан — нотолгоогүй тул Шалгагдаагүй (tool), устгал нь түүний үр дагавар."""
+    from app.pipeline.stages import reclassify_invisible_record
+    steps = [
+        {"index": 1, "uses": "crud.auto_create", "status": M.PASS, "message": ""},
+        {"index": 2, "uses": "crud.search", "status": M.FAIL, "message": "'T A1 автомат тест' хайлтаар мөр олдсонгүй"},
+        {"index": 3, "uses": "crud.auto_update", "status": M.NOT_TESTED,
+         "message": "Өмнөх алхам #2 (Бүртгэснээ хайж олох) Fail"},
+        {"index": 5, "uses": "crud.delete", "status": M.FAIL, "message": "'T A1 автомат тест' агуулсан мөр олдсонгүй"},
+    ]
+    assert reclassify_invisible_record(steps)
+    assert [s["status"] for s in steps] == [M.PASS, M.NOT_TESTED, M.NOT_TESTED, M.NOT_TESTED]
+    assert steps[1]["cause"] == "tool" and steps[3]["cause"] == "dependent"
+    assert cause_of("", steps[3]["message"]) == "dependent" and steps[2]["message"].endswith("Шалгагдаагүй")
+    # Хадгалахад алдаа гарсан (#1 Fail) бол хөндөхгүй — тэр нь апп-ын хариу
+    other = [{"index": 1, "uses": "crud.auto_create", "status": M.FAIL, "message": "Системийн алдаа"},
+             {"index": 2, "uses": "crud.search", "status": M.FAIL, "message": "мөр олдсонгүй"}]
+    assert not reclassify_invisible_record(other) and other[1]["status"] == M.FAIL
