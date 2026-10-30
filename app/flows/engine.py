@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from urllib.parse import urlparse
 
 from app import models as M
-from app.runner.classify.cause import cause_of, status_for
+from app.runner.classify.cause import OUTAGE_PREFIX, cause_of, is_outage, status_for
 
 # Өгөгдөл өөрчлөхгүй алхмууд — хэрэгслийн түр саадаар зогсвол сэргээгээд 1 удаа дахин ажиллуулахад аюулгүй
 RETRYABLE_STEPS = {"report.read", "assert.delta", "doc.number", "crud.search", "crud.open", "crud.auto_verify",
@@ -399,6 +399,10 @@ class FlowEngine:
         except StepFailed as e:
             res.status, res.message = M.FAIL, self.sanitize(str(e))
             res.findings = list(e.findings) + [f for f in res.findings if f not in e.findings]
+            if is_outage(res.message):
+                # Сервер/gateway хүрэх боломжгүй (502/503/504, холболт) — апп-ын функциональ bug биш, орчны саад
+                res.status, res.category = M.BLOCKED, "infra"
+                res.message = f"{OUTAGE_PREFIX}: {res.message}"[:500]
         except asyncio.TimeoutError:
             res.status, res.message = M.BLOCKED, f"Алхам {timeout_s} сек-д дууссангүй (timeout)"
         except Exception as e:

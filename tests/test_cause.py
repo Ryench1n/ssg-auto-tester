@@ -200,3 +200,33 @@ def test_click_intercepted_without_app_message_is_not_a_bug(tmp_path):
     assert run.flows[0]["steps"][0]["status"] == M.NOT_TESTED and run.flows[0]["steps"][0]["cause"] == "tool"
     assert run.flows[0]["status"] == M.NOT_TESTED
     assert status_for("tool", msg)[0] == M.NOT_TESTED
+
+
+def test_gateway_outage_is_blocked_not_bug(tmp_path):
+    """testaccounting + testhr 2026-10-30 12:24–12:30: Cloudflare 502 / 503 хоёр систем дээр зэрэг — цэс бүр тусдаа
+    Major bug болж байсан. Сервер хүрэх боломжгүй нь апп талын саад (Blocked), харин HTTP 500 бол bug хэвээр."""
+    from app.report.rebuild import load_run
+    from app.runner.classify.cause import is_outage
+    assert is_outage("http_5xx: HTTP 502") and is_outage("Сервертэй холбогдож чадсангүй. StatusCode: 503")
+    assert not is_outage("http_5xx: HTTP 500") and not is_outage("Invalid column name 'X'")
+    steps = [{"index": 1, "name": "Засвар", "uses": "form.check_edit", "status": M.PASS, "message": ""},
+             {"index": 2, "name": "Шинэ", "uses": "form.check_new", "status": M.FAIL, "message": "http_5xx: HTTP 502"},
+             {"index": 3, "name": "Хэвлэх", "uses": "form.check_actions", "status": M.FAIL, "message": "http_5xx: HTTP 500"}]
+    raw = {"run_id": "r1", "project": "P", "url": "https://testaccounting.smartapp.mn", "results": [],
+           "flows": [{"flow": "form: A / B", "status": M.FAIL, "meta": {}, "steps": steps}]}
+    p = tmp_path / "raw.json"
+    p.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    st = load_run(p).flows[0]["steps"]
+    assert st[1]["status"] == M.BLOCKED and st[1]["cause"] == "app"
+    assert st[2]["status"] == M.FAIL                       # 500 — тухайн endpoint-ийн бодит алдаа байж болно
+
+
+def test_needs_recheck_on_partial_outage():
+    from app.pipeline.stages import infra_broken, needs_recheck
+    fr = FlowRun(run_id="r", url="u", flow="form: A", run_tag="T")
+    fr.steps = [StepResult(index=1, name="a", uses="x", status=M.PASS),
+                StepResult(index=2, name="b", uses="x", status=M.BLOCKED, category="infra",
+                           message="Тест орчин хариу өгөөгүй: http_5xx: HTTP 502")]
+    assert not infra_broken(fr) and needs_recheck(fr)
+    fr.steps[1] = StepResult(index=2, name="b", uses="x", status=M.FAIL, message="Blazor компонент унав")
+    assert not needs_recheck(fr)

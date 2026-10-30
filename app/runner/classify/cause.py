@@ -23,6 +23,21 @@ APP_EVIDENCE = (
     "Тест орчин хариу өгөөгүй",
     "сек-ээс удаан гацсан",          # апп-ын өөрийн «Loading…» spinner арилаагүй (smoke)
 )
+# Тест орчин (сервер / gateway) хүрэх боломжгүй — функциональ bug биш, апп талын саад (Blocked). HTTP 500 энд ОРОХГҮЙ:
+# тэр нь тухайн endpoint-ийн бодит алдаа байж болно. testaccounting + testhr 2026-10-30 12:24–12:30: Cloudflare
+# 502/503 хоёр систем дээр зэрэг — цэс бүр тусдаа Major bug болж байсан.
+OUTAGE_EVIDENCE = (
+    "Сервертэй холбогдож чадсангүй", "ServiceUnavailable", "BadGateway", "Bad gateway", "Bad Gateway",
+    "GatewayTimeout", "StatusCode: 502", "StatusCode: 503", "StatusCode: 504", "HTTP 502", "HTTP 503", "HTTP 504",
+    "Failed to fetch", "net::ERR_",
+)
+OUTAGE_PREFIX = "Тест орчин хариу өгөөгүй"
+
+
+def is_outage(message: str) -> bool:
+    return any(p in (message or "") for p in OUTAGE_EVIDENCE)
+
+
 DEPENDENT_PREFIX = ("Өмнөх алхам", "Шаардлагатай өгөгдөл алга", "Харьцуулах тайлангийн агшин алга",
                     "Бүртгэл хадгалах хүртэл явагдаагүй")
 OPERATOR_TEXT = ("Хэрэглэгч зогсоосон", "хэрэглэгч зогсоосон", "Нэвтэрсэн session алга", "Session алдагдсан",

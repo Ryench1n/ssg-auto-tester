@@ -45,7 +45,14 @@ def crash_pages(run) -> set[str]:
 # Апп/орчны тасалдлын шинж (аппын bug биш): сервертэй холбогдож чадаагүй, хуудас өөр тийш шилжсэн, цэсний мод алга
 INFRA_PATTERNS = ("цэс олдсонгүй", "цэсийг дарж чадсангүй", "Failed to fetch", "Сервертэй холбогдож чадсангүй",
                   "Execution context was destroyed", "цэсний таб нээгдсэнгүй", "has been closed",
-                  "net::ERR_", "Хөтөч хаагдсан")
+                  "net::ERR_", "Хөтөч хаагдсан", "ServiceUnavailable", "BadGateway", "Bad gateway",
+                  "StatusCode: 502", "StatusCode: 503", "StatusCode: 504", "HTTP 502", "HTTP 503", "HTTP 504")
+
+
+def needs_recheck(run) -> bool:
+    """Форм шалгалт: бүх алхам тасалдсан, ЭСВЭЛ аль нэг алхам сервер/gateway-д хүрч чадаагүй (бусад нь Pass байсан ч) —
+    дахин ачаалж дахин шалгана (тасалдал түр зуурын бол цэсийг бодитоор шалгана)."""
+    return infra_broken(run) or any(s.status == M.BLOCKED and s.category == "infra" for s in run.steps)
 
 
 def stage_counts_msg(total: int, cnt: dict) -> str:
@@ -850,13 +857,13 @@ class FormCheckStage(Stage):
                         run.meta["reloaded"] = True
             # Орчны тасалдал (сервертэй холбогдож чадаагүй, хуудас шилжсэн, цэсний мод алга): аппын bug биш —
             # дахин ачаалж дахин шалгана; хэвээр бол хойшлуулж, дараалсан 3 бол зогсоож үлдсэнийг resume-д хадгална
-            if infra_broken(run) and not pipe.halt.is_set():
+            if needs_recheck(run) and not pipe.halt.is_set():
                 pipe.runlog.log(f"Форм шалгалт: «{menu_path(item)}» — орчны тасалдлын шинж "
                                 f"({next((s.message for s in run.steps if s.message), '')[:120]}) — дахин ачаалж дахин шалгана", "warn")
                 await ui.reload_app(eng, "орчны тасалдал")
                 run = await attempt(make_engine())
                 run.meta["rechecked"] = True
-            if infra_broken(run) and not pipe.halt.is_set():
+            if needs_recheck(run) and not pipe.halt.is_set():
                 if key not in deferred:
                     deferred.add(key)
                     streak += 1
@@ -876,8 +883,12 @@ class FormCheckStage(Stage):
                     t_clean = time.monotonic()
                     continue
                 # хоёр дахь оролдлого ч тасалдсан — апп/сервер хариу өгөхгүй (нотолгоо: 2 оролдлого, дахин ачаалсан)
-                # → Fail биш, апп талын саад (Blocked, шалтгаан «app»)
+                # → Fail биш, апп талын саад (Blocked, шалтгаан «app»). Хэсэгчилсэн тасалдалд (зарим алхам л сервертэй
+                # холбогдоогүй) бусад алхмын Fail нь бие даасан апп-ын хариу — хөндөхгүй
+                all_broken = infra_broken(run)
                 for s in run.steps:
+                    if not all_broken:
+                        break
                     if s.status == M.FAIL and any(p in (s.message or "") for p in BROWSER_GONE):
                         s.status, s.cause = M.NOT_TESTED, "operator"     # хөтөч хаагдсан — апп-ын нотолгоо биш
                     elif s.status == M.FAIL:

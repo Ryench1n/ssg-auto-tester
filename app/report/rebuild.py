@@ -78,7 +78,7 @@ def load_run(raw_path: Path) -> M.RunData:
             r.status = M.PASS
     # Хуучин raw.json: Blocked-ийг шалтгаанаар нь дахин ангилна — апп талын нотолгоотой саад л Blocked,
     # хэрэгсэл/тохиргоо/өгөгдлийн шалтгаантай нь «Шалгагдаагүй» (classify/cause.py)
-    from app.runner.classify.cause import status_for
+    from app.runner.classify.cause import OUTAGE_PREFIX, is_outage, status_for
     from app.runner.smoke import classify_item
     for r in results:
         if not r.cause:
@@ -93,6 +93,11 @@ def load_run(raw_path: Path) -> M.RunData:
                     and "товчийг дарж чадсангүй (өөр цонх/элемент хааж байна)" in (s.get("message") or "")):
                 # Хуучин run: алдаа/анхааруулгагүй click амжилтгүй — хэрэгслийн асуудал, bug биш
                 s["status"], s["cause"], s["category"] = M.NOT_TESTED, "tool", "tool"
+                changed = True
+            if s.get("status") == M.FAIL and is_outage(s.get("message") or ""):
+                # Хуучин run: сервер/gateway хүрэх боломжгүй (502/503/504) — функциональ bug биш, орчны саад
+                s["status"], s["category"], s["cause"] = M.BLOCKED, "infra", "app"
+                s["message"] = f"{OUTAGE_PREFIX}: {s.get('message')}"[:500]
                 changed = True
             if s.get("status") == M.BLOCKED and not s.get("cause"):
                 s["status"], s["cause"] = status_for(s.get("category") or "", s.get("message") or "")

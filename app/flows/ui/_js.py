@@ -67,7 +67,26 @@ const __fieldLabel = (i) => {
     }
     el = el.parentElement;
   }
-  return '';
+  return __rowLabel(i);
+};
+// Байрлалаар: input-ийн мөрөнд (босоо давхцал), зүүн талд хамгийн ойр байрлах богино текст. DOM бүтэц өөрчлөгдөхөд
+// (ж: testretail 2026-10-30 — Код талбар хайлтын товчтой шинэ wrapper дотор орж шошго 4 өвгөөс хол болсон) ажиллана
+const __rowLabel = (i) => {
+  const r = i.getBoundingClientRect();
+  if (!r.width || !r.height) return '';
+  const cy = r.top + r.height / 2;
+  const root = i.closest('dxbl-modal, .dxbl-modal, [role=dialog], form') || document.body;
+  let best = null, bestRight = -Infinity;
+  for (const el of root.querySelectorAll('label, span, div, td, th')) {
+    if (el.contains(i) || el.querySelector('input, textarea, select, button')) continue;
+    if (el.children.length > 2) continue;
+    const t = __txt(el);
+    if (!t || t.length > 40 || t.includes('\n')) continue;
+    const b = el.getBoundingClientRect();
+    if (!b.width || b.top > cy || b.bottom < cy || b.right > r.left + 4 || r.left - b.right > 300) continue;
+    if (b.right > bestRight) { best = t; bestRight = b.right; }
+  }
+  return best ? best.trim() : '';
 };
 """
 
