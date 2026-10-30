@@ -184,3 +184,19 @@ def test_update_outcomes_reclassified():
     opened = [{"index": 3, "uses": "crud.auto_update", "status": M.FAIL, "message": "Бичлэгийг засахаар нээхэд: x"},
               {"index": 5, "uses": "crud.delete", "status": M.FAIL, "message": "мөр олдсонгүй"}]
     assert not reclassify_update_outcomes(opened) and opened[1]["status"] == M.FAIL
+
+
+def test_click_intercepted_without_app_message_is_not_a_bug(tmp_path):
+    """testaccounting 2026-10-29: «Шинэ» товчийг өөр элемент хааж Page.click Timeout — алдааны цонхгүй тул Major bug
+    биш, Шалгагдаагүй (tool)."""
+    from app.report.rebuild import load_run
+    msg = "«Шинэ» товчийг дарж чадсангүй (өөр цонх/элемент хааж байна): Page.click: Timeout 5000ms exceeded."
+    raw = {"run_id": "r1", "project": "P", "url": "https://testaccounting.smartapp.mn", "results": [],
+           "flows": [{"flow": "form: A / B", "status": M.FAIL, "meta": {}, "steps": [
+               {"index": 2, "name": "Шинэ форм", "uses": "form.check_new", "status": M.FAIL, "message": msg}]}]}
+    p = tmp_path / "raw.json"
+    p.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    run = load_run(p)
+    assert run.flows[0]["steps"][0]["status"] == M.NOT_TESTED and run.flows[0]["steps"][0]["cause"] == "tool"
+    assert run.flows[0]["status"] == M.NOT_TESTED
+    assert status_for("tool", msg)[0] == M.NOT_TESTED

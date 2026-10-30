@@ -199,6 +199,8 @@ async def auto_empty_save(env, args: dict) -> dict:
             if not e.findings and "хаагдсангүй" in str(e):
                 env.note("Хоосон хадгалахад форм нээлттэй үлдэв (талбарын validation)")
                 return {}
+            if isinstance(e, StepBlocked):
+                raise
             raise StepFailed(f"Хоосон форм хадгалахад: {e}", e.findings) from None
         now_tabs = await ui.tab_names(env)
         saved = (opened == "dialog" and await ui.dialog_count(env) < form_level) or \

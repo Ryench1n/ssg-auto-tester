@@ -89,6 +89,11 @@ def load_run(raw_path: Path) -> M.RunData:
         changed = auto and reclassify_invisible_record(f.get("steps") or [])
         changed = (auto and reclassify_update_outcomes(f.get("steps") or [])) or changed
         for s in f.get("steps") or []:
+            if (s.get("status") == M.FAIL and not s.get("findings")
+                    and "товчийг дарж чадсангүй (өөр цонх/элемент хааж байна)" in (s.get("message") or "")):
+                # Хуучин run: алдаа/анхааруулгагүй click амжилтгүй — хэрэгслийн асуудал, bug биш
+                s["status"], s["cause"], s["category"] = M.NOT_TESTED, "tool", "tool"
+                changed = True
             if s.get("status") == M.BLOCKED and not s.get("cause"):
                 s["status"], s["cause"] = status_for(s.get("category") or "", s.get("message") or "")
                 changed = True

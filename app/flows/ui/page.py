@@ -7,7 +7,7 @@ import time
 from typing import TYPE_CHECKING
 
 from app import models as M
-from app.flows.context import StepFailed
+from app.flows.context import StepBlocked, StepFailed
 from app.models import Finding
 from app.runner.detectors import snapshot
 from app.flows.ui._js import (
@@ -34,7 +34,12 @@ async def click_button(env: "FlowEngine", texts: list[str], scope: str = "auto",
         found = await env.page.evaluate(FIND_BUTTON_JS, [sel_payload(env), texts, scope])
         if found:
             try:
-                await env.page.click("[data-ssg-btn='1']", timeout=5000)
+                try:
+                    await env.page.click("[data-ssg-btn='1']", timeout=5000)
+                except Exception:
+                    # Түр зуурын давхарга (ачаалал, хаагдаж буй цонх) — нэг удаа хүлээгээд дахин дарна
+                    await settle(env)
+                    await env.page.click("[data-ssg-btn='1']", timeout=5000)
             except Exception as e:
                 # Товчийг өөр цонх (ж: алдааны цонх, удаан нээгдсэн форм) хааж байна — Timeout биш шалтгааныг мэдээлнэ
                 errors, warnings = await popup_problems(env)
@@ -43,8 +48,9 @@ async def click_button(env: "FlowEngine", texts: list[str], scope: str = "auto",
                 if warnings:
                     raise StepFailed(f"«{found}» дарах үед: баталгаажуулалтын анхааруулга — {warnings[0]}",
                                      [Finding(M.WARNING_TOAST, w) for w in warnings]) from None
-                raise StepFailed(f"«{found}» товчийг дарж чадсангүй (өөр цонх/элемент хааж байна): "
-                                 f"{str(e).splitlines()[0][:150]}") from None
+                # Алдаа/анхааруулгагүйгээр дарагдсангүй — апп-ын нотолгоо биш (хэрэгслийн click) → Шалгагдаагүй
+                raise StepBlocked(f"«{found}» товчийг дарж чадсангүй (өөр цонх/элемент хааж байна): "
+                                  f"{str(e).splitlines()[0][:150]}", category="tool") from None
             return found
         if time.monotonic() >= deadline:
             raise StepFailed(f"Товч олдсонгүй: {' / '.join(texts)}")
