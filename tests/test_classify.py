@@ -226,3 +226,14 @@ def test_adopt_legacy_confirm_shots(tmp_path):
     rs = [ItemResult(MenuItem("M", "", n, f"/{n}"), status=M.FAIL, confirmation="Баталгаажсан (2/2)") for n in "АБВ"]
     assert adopt_confirm_shots(tmp_path, rs) == 2
     assert [r.confirm_screenshot for r in rs] == ["", "shots/item-0016.png", "shots/item-0017.png"]
+
+
+def test_bug_title_shows_real_file_name():
+    """Гарчигт файлын нэр яг байна (`bs5.css`, `bs#.css` биш) — хөгжүүлэгч нэрээр нь хайна; нэгтгэл тоог үл тооно."""
+    from app.runner.classify.severity import title_for
+    a = Finding(M.ASSET_4XX, "HTTP 404", status=404,
+                url="https://x/_content/DevExpress.Blazor.Reporting.Viewer/css/dx-blazor-reporting-components.bs5.css")
+    assert title_for(a).endswith("dx-blazor-reporting-components.bs5.css")
+    b = Finding(M.ASSET_4XX, "HTTP 404", status=404, url="https://x/fonts/times2.ttf")
+    c = Finding(M.ASSET_4XX, "HTTP 404", status=404, url="https://x/fonts/times3.ttf")
+    assert signature(b) == signature(c)

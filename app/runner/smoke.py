@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
+from urllib.parse import urlparse
 
 from app import models as M
 from app.models import Finding, ItemResult, MenuItem, RunData, TimelineEvent
@@ -823,7 +824,14 @@ class SmokeRunner:
             if not r.tab_opened and not st.dialogs and not flags.reload and not flags.crash and not forbidden:
                 r.findings.append(Finding(M.NO_TAB, f"«{item.name}» дарахад таб нээгдсэнгүй"))
         if flags.reload:
-            r.findings.append(Finding(M.PAGE_RELOAD, "Цэс дарахад SPA бүтэн дахин ачаалагдаж, табууд хаагдсан"))
+            # Хөтөч аль хаягийг шинээр ачаалсныг бичнэ — «reload болсон» гэхээс хөгжүүлэгч эх үүсвэрийг олохгүй байсан
+            # (testtour «Имэйлийн тохиргоо»: /emaillist-ийг 3 удаа бүтнээр ачаалсан)
+            navs = [urlparse(e["url"]).path or e["url"] for e in self.col.since(t_click) if e["type"] == "nav"]
+            target = max(set(navs), key=navs.count) if navs else ""
+            where = (f" — хөтөч «{target}» хаягийг бүтнээр ачаалсан"
+                     + (f" ({navs.count(target)} удаа)" if navs.count(target) > 1 else "")) if target else ""
+            r.findings.append(Finding(M.PAGE_RELOAD, f"Цэс дарахад SPA бүтэн дахин ачаалагдаж, табууд хаагдсан{where}",
+                                      url=self.url.rstrip("/") + target if target else ""))
         if self.col.has_crash(self.col.since(t_click)):
             flags.crash = True
         self._lap("collect")

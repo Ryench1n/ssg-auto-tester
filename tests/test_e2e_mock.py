@@ -133,6 +133,9 @@ def test_devexpress_popup_closed_by_x(e2e):
 
 def test_page_reload_detected(e2e):
     assert M.PAGE_RELOAD in _kinds(e2e, "Ерөнхий журнал")
+    # хөгжүүлэгчид: хөтөч аль хаягийг шинээр ачаалсныг бичнэ (testtour «Имэйлийн тохиргоо» → /emaillist)
+    f = next(f for f in _res(e2e, "Ерөнхий журнал").findings if f.kind == M.PAGE_RELOAD)
+    assert "хаягийг бүтнээр ачаалсан" in f.text and f.url, f
 
 
 def test_deploy_503_retried(e2e):

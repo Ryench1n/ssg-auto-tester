@@ -7,7 +7,7 @@ import re
 from app import models as M
 from app.models import ItemResult, RunData, TestCase
 from app.runner.severity import Severity
-from app.runner.classify.signature import _url_pattern, first_exception_line
+from app.runner.classify.signature import first_exception_line, url_path
 from app.runner.classify.severity import FLOW_EXPECTED, FORM_STEPS
 from app.runner.classify.modules import ModuleCoder
 from app.runner.classify.cause import cause_of, status_for
@@ -32,7 +32,7 @@ def _short_note(r: ItemResult) -> str:
     for f in r.findings:
         t = (f.text or f.kind).replace("\n", " ").strip()
         if f.kind in (M.HTTP_5XX, M.HTTP_4XX, M.ASSET_4XX):
-            t = f"HTTP {f.status} {_url_pattern(f.url)}"
+            t = f"HTTP {f.status} {url_path(f.url)}"
         elif f.kind == M.RUNTIME_CRASH:
             t = "Runtime уналт: " + first_exception_line(f.detail or f.text)
         parts.append(t[:150])

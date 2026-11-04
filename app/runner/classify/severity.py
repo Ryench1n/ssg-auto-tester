@@ -6,7 +6,7 @@ import re
 from app import models as M
 from app.models import Finding
 from app.runner.severity import Severity
-from app.runner.classify.signature import _url_pattern, first_exception_line
+from app.runner.classify.signature import first_exception_line, url_path
 from app.runner.detectors import ERROR_PAGE_DETAIL
 
 
@@ -123,7 +123,7 @@ def title_for(f: Finding) -> str:
             return f"Цэсийн таб дотор системийн алдааны хуудас гарна: {short}"
         return f"Системийн алдааны цонх гарна: {short}"
     if k == M.HTTP_5XX:
-        return f"Сервер HTTP {f.status} алдаа буцаана: {_url_pattern(f.url)}"
+        return f"Сервер HTTP {f.status} алдаа буцаана: {url_path(f.url)}"
     if k == M.LOADING_STUCK:
         return "Дэлгэц \"Loading…\" төлөвт гацаж контент гарахгүй"
     if k == M.TIMEOUT:
@@ -143,9 +143,9 @@ def title_for(f: Finding) -> str:
     if k == M.WARNING_TOAST:
         return f"Цэс нээгдэхэд шууд анхааруулга гарна: {short}"
     if k == M.HTTP_4XX:
-        return f"HTTP {f.status} хариу: {_url_pattern(f.url)}"
+        return f"HTTP {f.status} хариу: {url_path(f.url)}"
     if k == M.ASSET_4XX:
-        return f"Статик файл олдохгүй (HTTP {f.status}): {_url_pattern(f.url)}"
+        return f"Статик файл олдохгүй (HTTP {f.status}): {url_path(f.url)}"
     if k == M.FLOW_STEP_FAIL:
         return f"E2E урсгалын алхам амжилтгүй: {short}"
     if k == M.BLANK_PAGE:

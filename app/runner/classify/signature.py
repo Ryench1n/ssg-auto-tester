@@ -41,6 +41,13 @@ def _url_pattern(url: str) -> str:
     return normalize_text(p.path or url, 120)
 
 
+def url_path(url: str) -> str:
+    """Хүнд уншигдах зам (тоог «#» болгохгүй): bug-ийн гарчиг, тэмдэглэлд — хөгжүүлэгч файлыг яг нэрээр нь хайна
+    (`…bs5.css`-ийг `…bs#.css` гэж харуулдаг байсан). Нэгтгэлд (signature) _url_pattern-ийг хэвээр ашиглана."""
+    p = urlparse(url or "")
+    return (p.path or url or "")[:160]
+
+
 def signature(f: Finding) -> str:
     k = f.kind
     if k in (M.PAGE_RELOAD, M.SESSION_LOGOUT, M.LOGIN_FAILED, M.NO_TAB, M.TAB_NAME_MISMATCH,
