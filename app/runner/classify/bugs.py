@@ -97,11 +97,13 @@ def build_bugs(run: RunData, tcs: list[TestCase], cfg: dict) -> list[Bug]:
             dup = len(g["tcs"]) - n_pages
             actual += (f" (нийт {n_pages} хуудсанд давтагдсан" if n_pages > 1 else " (нэг хуудас")
             actual += (f"; {dup} нь өөр модульд давхардсан ижил цэс)" if dup > 0 else ")")
-        shot = next((r.screenshot for r in g["results"] if r.screenshot), "")
+        shot_r = next((r for r in g["results"] if r.screenshot), first_r)
+        shot = shot_r.screenshot if shot_r else ""
         bugs.append(Bug(
             bug_id="", signature=sig, kind=f.kind, severity=sev, title=title_for(f),
             modules=g["modules"], tc_ids=g["tcs"], steps=steps, expected=expected,
-            actual=actual[:800], stack=stack, screenshot=shot, confirmed=confirmed,
+            actual=actual[:800], stack=stack, screenshot=shot,
+            confirm_screenshot=shot_r.confirm_screenshot if shot_r else "", confirmed=confirmed,
             fix=fix_for(f), security_note=sec, status="Open",
             found_date=(first_r.checked_at[:10] if first_r and first_r.checked_at
                         else (run.started_at or datetime.now().isoformat())[:10]),

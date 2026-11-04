@@ -1,7 +1,8 @@
 """Mock SPA (tests/fixtures/mock_site) дээр бүх илрүүлэгч + recovery-г төгсгөлөөс-төгсгөл шалгана.
 
 Mock сайтын цэсүүд:
-  Журнал / Роль / Сесс шалгах → хэвийн; Робот (RPA) → static CSS 404 (screenshot-тай)
+  Журнал / Роль / Сесс шалгах → хэвийн; Робот (RPA) → static CSS 404 (Pass + анхааруулга, screenshot-тай)
+  Хугацаат ажил     → таб доторх «Системийн алдаа» хуудас (Blazor ErrorBoundary, цонх биш)
   Дансны төлөвлөгөө → HTTP 500 + "Системийн алдаа" модал (+ хориотой "Хадгалах" товч)
   Ерөнхий журнал    → location.reload()
   Мөнгөн гүйлгээ    → эхний удаа 503 + msdeploy, дараа нь хэвийн
@@ -62,7 +63,7 @@ def _kinds(e2e, name):
 def test_login_and_discovery(e2e):
     d = e2e["data"]
     assert d.login_ok and d.app_version == "v2.4.1.7"
-    assert d.discovered == {"Ерөнхий дэвтэр": 8, "Систем": 6}
+    assert d.discovered == {"Ерөнхий дэвтэр": 8, "Систем": 7}
 
 
 def test_normal_items_pass(e2e):
@@ -81,8 +82,43 @@ def test_network_only_error_has_screenshot(e2e):
     """Зөвхөн сүлжээний алдаатай (static CSS 404) цэс — алдааг табыг хаасны дараа цуглуулдаг тул урьд нь
     screenshot-гүй үлддэг байсан (testbalancelite «Тайлан» модуль)."""
     r = _res(e2e, "Робот (RPA)")
-    assert M.HTTP_4XX in _kinds(e2e, "Робот (RPA)")
+    assert M.ASSET_4XX in _kinds(e2e, "Робот (RPA)")
     assert r.screenshot, "screenshot алга"
+
+
+def test_missing_static_asset_is_warning_not_fail(e2e):
+    """Дутуу CSS (хуудас ажилладаг) нь цэсийг Fail болгохгүй — testbalancelite-ийн тайлан харагчийн CSS 404 нэг
+    файлаар 42 цэсийг Fail, run-ыг NO-GO болгож байсан. Bug-ийн жагсаалтад 🟢 Minor хэвээр."""
+    r = _res(e2e, "Робот (RPA)")
+    assert r.status == M.PASS and M.HTTP_4XX not in _kinds(e2e, "Робот (RPA)"), r.findings
+    b = next(b for b in e2e["summary"]["bugs"] if b["signature"].startswith("asset_4xx"))
+    assert b["title"].startswith("Статик файл олдохгүй") and "Minor" in b["severity"]
+
+
+def test_in_tab_error_page_detected(e2e):
+    """Таб доторх «Системийн алдаа» хуудас (цонх биш) нь Fail + Major bug — урьд нь зөвхөн консолын
+    ErrorBoundary мөрөөр Minor болж үлддэг байсан (testretail «Хугацаат ажлын дэлгэрэнгүй жагсаалт»)."""
+    r = _res(e2e, "Хугацаат ажил")
+    assert r.status == M.FAIL, r.findings
+    f = next(f for f in r.findings if f.kind == M.SYSTEM_ERROR)
+    assert f.text.startswith("Системийн алдаа") and "SLRangePicker" in f.text and "Дахин ачаалах" not in f.text
+    assert r.confirmation.startswith("Баталгаажсан"), r.confirmation
+    b = next(b for b in e2e["summary"]["bugs"] if "SLRangePicker" in b["title"])
+    assert b["title"].startswith("Цэсийн таб дотор системийн алдааны хуудас") and "Major" in b["severity"]
+    # бусад цэс (жагсаалт, цонхтой) таб доторх алдааны хуудас гэж худал илрэхгүй
+    for n in ("Журнал", "Дансны төлөвлөгөө", "Эрсдэлийн бүртгэл"):
+        assert not any("SLRangePicker" in x.text for x in _res(e2e, n).findings), n
+
+
+def test_confirm_screenshot_attached(e2e):
+    """Давтан баталгаажуулалтын screenshot тайланд «TC-…-2.png» болж хавсарна (урьд нь холбоосгүй үлддэг байсан)."""
+    r = _res(e2e, "Дансны төлөвлөгөө")
+    assert r.confirm_screenshot.endswith("-2.png") and (e2e["dir"] / r.confirm_screenshot).exists()
+    assert r.confirm_screenshot == r.screenshot.replace(".png", "-2.png")
+    b = next(b for b in e2e["summary"]["bugs"] if "CostCenterId" in b["title"])
+    assert b["confirm_screenshot"] == r.confirm_screenshot
+    # хавсаргаагүй (item-*.png) screenshot үлдэхгүй
+    assert not list((e2e["dir"] / "shots").glob("item-*.png"))
 
 
 def test_devexpress_popup_closed_by_x(e2e):

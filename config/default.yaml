@@ -78,13 +78,17 @@ detect:
   sql_error: ["Invalid column name", "Invalid object name", "SqlException", "Cannot insert the value NULL",
               "conversion failed", "Violation of", "Cannot create a DbSet", "is not included in the model"]
   system_error_title: ["Системийн алдаа", "Cистемийн алдаа", "System error", "Алдаа", "Мэдээлэл татах боломжгүй"]
+  # Таб доторх алдааны хуудсын (ErrorBoundary) гарчиг — текст нь яг таарвал Fail (Major). «Алдаа» мэт ерөнхий үгийг
+  # оруулахгүй: баганын толгой, шошго байж болно
+  error_page_titles: ["Системийн алдаа", "Cистемийн алдаа", "System error"]
   warning_toast: ["сонгоно уу", "оруулна уу"]
   ignore_console: ["favicon.ico", "Download the React DevTools", "DevTools failed to load"]
   # Яг ийм тексттэй консол алдааг үл тооно. «readonly» — апп өөрөө html2canvas-аар DevExpress элемент
   # хуулахад DevExpress-ийн attributeChangedCallback шиддэг хор хөнөөлгүй алдаа (хэрэглэгчид харагдахгүй)
   ignore_console_exact: ["readonly"]
-  # Цэсийг Fail болгохгүй «зөөлөн» илрэл — цэс Pass + анхааруулга, bug-ийн жагсаалтад 🟢 Minor
-  soft_findings: ["console_error", "warning_toast", "slow_load", "tab_name_mismatch"]
+  # Цэсийг Fail болгохгүй «зөөлөн» илрэл — цэс Pass + анхааруулга, bug-ийн жагсаалтад 🟢 Minor.
+  # asset_4xx: дутуу CSS/зураг/фонт (testbalancelite-ийн тайлан харагчийн CSS 404 нэг файлаар 42 цэсийг Fail болгож байсан)
+  soft_findings: ["console_error", "warning_toast", "slow_load", "tab_name_mismatch", "asset_4xx"]
   deploy_marker: "msdeploy"
   forbidden_major_threshold: 5   # 403 үүнээс олон цэсэд давтагдвал 🟡 Major
 

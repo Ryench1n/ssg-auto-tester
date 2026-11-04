@@ -22,6 +22,7 @@ TAB_WRONG_PAGE = "tab_wrong_page"          # табын нэр огт өөр —
 NO_TAB = "no_tab"
 WARNING_TOAST = "warning_toast"
 HTTP_4XX = "http_4xx"
+ASSET_4XX = "asset_4xx"                # дутуу статик файл (CSS/зураг/фонт) — хуудас ажилладаг (Minor, анхааруулга)
 FLOW_STEP_FAIL = "flow_step_fail"      # E2E (crud) урсгалын алхам амжилтгүй
 NA = "N/A"                             # урсгалын бүх алхам хамаарахгүй / өгөгдөлгүй (тооцоонд орохгүй)
 BLANK_PAGE = "blank_page"              # таб нээгдсэн ч агуулга хоосон (цагаан дэлгэц)
@@ -79,6 +80,7 @@ class ItemResult:
     tab_name: str = ""
     load_ms: int | None = None
     screenshot: str = ""
+    confirm_screenshot: str = ""  # давтан баталгаажуулалтын (2 дахь оролдлогын) screenshot
     attempts: int = 0
     confirmation: str = ""        # "Баталгаажсан (2/2)" / "1 удаа ажиглагдсан"
     notes: list[str] = field(default_factory=list)
@@ -180,6 +182,7 @@ class Bug:
     actual: str = ""
     stack: str = ""
     screenshot: str = ""
+    confirm_screenshot: str = ""
     confirmed: str = ""
     fix: str = ""
     security_note: str = ""

@@ -48,6 +48,6 @@ def signature(f: Finding) -> str:
         return k
     if k == M.RUNTIME_CRASH:
         return f"{k}|{normalize_text(first_exception_line(f.detail or f.text), 160)}"
-    if k in (M.HTTP_5XX, M.HTTP_4XX):
+    if k in (M.HTTP_5XX, M.HTTP_4XX, M.ASSET_4XX):
         return f"{k}|{f.status}|{_url_pattern(f.url)}"
     return f"{k}|{normalize_text(f.text)}"

@@ -20,7 +20,8 @@ from app.runner import discovery
 from app.runner.capabilities import scan_actions
 from app.runner.classify import bug_candidates, signature
 from app.runner.classify.cause import status_for
-from app.runner.detectors import tab_mismatch_finding, DIALOGS_FN, Collector, classify_popup, names_match, snapshot, strip_query
+from app.runner.detectors import (tab_mismatch_finding, DIALOGS_FN, ERROR_PAGE_DETAIL, Collector, classify_popup,
+                                  dialog_text, error_pages, names_match, snapshot, strip_query)
 from app.runner.runlog import RunLog, now_iso
 from app.runner.session import is_login_url, wait_login_or_app
 
@@ -113,6 +114,24 @@ TOAST_JS = r"""
 }
 """
 
+# Screenshot-ын доод талд аль цэс, ямар илрэл болохыг бичнэ: reload-ын дараах зураг (ачааллын дэлгэц) цэс бүрт
+# ижил харагдаж, аль цэсийнх болохыг ялгах боломжгүй байсан (testretail Ваучер / Дашбоард, 2026-11-03).
+# Зөвхөн screenshot авах агшинд DOM-д байж, дараа нь шууд устгагдана. Хоосон текст → устгана.
+CAPTION_JS = r"""
+(text) => {
+  const old = document.getElementById('__ssg_caption');
+  if (old) old.remove();
+  if (!text || !document.body) return;
+  const d = document.createElement('div');
+  d.id = '__ssg_caption';
+  d.textContent = text;
+  d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;pointer-events:none;'
+    + 'background:rgba(17,24,39,.88);color:#fff;font:13px/1.5 "Segoe UI",Arial,sans-serif;padding:4px 10px;'
+    + 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+  document.body.appendChild(d);
+}
+"""
+
 
 def classify_item(r: ItemResult) -> None:
     """Blocked цэсийг шалтгаанаар нь: апп талын нотолгоотой саад л Blocked, бусад (хэрэгсэл, тохиргоо, session) —
@@ -129,7 +148,7 @@ def smoke_status(r: ItemResult, cfg: dict) -> str:
         st, r.cause = status_for("", r.blocked_reason)
         return st
     soft = set((cfg.get("detect") or {}).get("soft_findings")
-               or [M.CONSOLE_ERROR, M.WARNING_TOAST, M.SLOW_LOAD, M.TAB_NAME_MISMATCH])
+               or [M.CONSOLE_ERROR, M.WARNING_TOAST, M.SLOW_LOAD, M.TAB_NAME_MISMATCH, M.ASSET_4XX])
     if any(f.kind not in soft for f in r.findings):
         return M.FAIL
     return M.PASS
@@ -159,6 +178,7 @@ class SmokeRunner:
         self._seen_href: dict[str, ItemResult] = {}   # href → анх шалгасан үр дүн (давхардсан цэс)
         self.last_error = ""
         self._shot_seq = 0
+        self._confirming = False              # давтан баталгаажуулалтын явц (screenshot-ын тайлбарт)
         self.discovered_items: list[MenuItem] = []
         t = cfg["timing"]
         self.wait_s = t["wait_ms"] / 1000
@@ -334,10 +354,12 @@ class SmokeRunner:
                 self.emit_cb("status", {"state": "confirming", "total": len(fails)})
                 self.log(f"Давтан баталгаажуулалт: {len(fails)} Fail цэс")
                 confirmed = 0
+                self._confirming = True
                 for r in fails:
                     if self.cancel_event.is_set():
                         break
-                    r2 = await self._check_item(r.item, confirm=True)
+                    r2 = await self._check_item(r.item)
+                    r.confirm_screenshot = r2.screenshot     # 2 дахь оролдлогын нотолгоо — тайланд хавсарна
                     s1 = {signature(f) for f in bug_candidates(r)}
                     s2 = {signature(f) for f in bug_candidates(r2)}
                     if s1 & s2:
@@ -345,6 +367,7 @@ class SmokeRunner:
                         confirmed += 1
                     else:
                         r.confirmation = "1 удаа ажиглагдсан"
+                self._confirming = False
                 self.timeline("Давтан баталгаажуулалт", f"{confirmed}/{len(fails)} баталгаажсан",
                               "Fail цэс бүрийг 1 удаа дахин шалгасан")
                 # Дахин шалгасан цэс (ж: «Робот (RPA)») апп-ыг дахин унагаж болно — дараагийн үе шат (автомат CRUD)
@@ -508,7 +531,8 @@ class SmokeRunner:
             prev.findings.extend(replace(classify_popup(d, self.cfg, is_toast=False), after_close=True)
                                  for d in st.dialogs)
             if not prev.screenshot:
-                prev.screenshot = await self._screenshot(self._shot_name())
+                prev.screenshot = await self._screenshot(
+                    self._shot_name(), self._caption(prev.item, "таб хаасны дараа алдааны цонх гарсан"))
             if prev.status == M.PASS:
                 self.counts[M.PASS] = self.counts.get(M.PASS, 1) - 1
                 self.counts[M.FAIL] = self.counts.get(M.FAIL, 0) + 1
@@ -525,17 +549,33 @@ class SmokeRunner:
         except Exception:
             return None
 
-    async def _screenshot(self, name: str) -> str:
+    def _caption(self, item: MenuItem, what: str = "", findings: list[Finding] | None = None) -> str:
+        """Screenshot-ын доод тайлбар: «цэсний зам · илрэл» (давтан шалгалтын үед тэмдэглэнэ)."""
+        if not what and findings:
+            f = next((x for x in findings if x.kind in M.PRIMARY_KINDS), findings[0])
+            what = (f.text or f.kind).split("\n")[0].strip()
+            if f.kind == M.PAGE_RELOAD:
+                what += " — дэлгэц: reload-ын дараах"
+        path = " › ".join(p for p in (item.module, item.folder, item.name) if p)
+        prefix = "Давтан шалгалт (2 дахь оролдлого) · " if self._confirming else ""
+        return f"{prefix}{path}" + (f" · {what[:160]}" if what else "")
+
+    async def _screenshot(self, name: str, caption: str = "") -> str:
         path = self.run_dir / "shots" / f"{name}.png"
         try:
+            if caption:
+                await self._eval(CAPTION_JS, caption)
             await self.page.screenshot(path=str(path), timeout=5000)
             # Windows дээр Path нь "\\" ашигладаг — URL/JSON-д үргэлж "/" байх ёстой.
             return path.relative_to(self.run_dir).as_posix()
         except Exception:
             return ""
+        finally:
+            if caption:
+                await self._eval(CAPTION_JS, "")
 
     # ---------------------------------------------------------- item check
-    async def _check_item(self, item: MenuItem, confirm: bool = False) -> ItemResult:
+    async def _check_item(self, item: MenuItem) -> ItemResult:
         if item.skip:
             return ItemResult(item, status=M.BLOCKED, blocked_reason="skip_items жагсаалтад орсон тул алгассан",
                               checked_at=now_iso())
@@ -550,6 +590,9 @@ class SmokeRunner:
         attempt = 0
         while attempt < 3:
             attempt += 1
+            if r is not None and r.screenshot:
+                # Дахин оролдож байна — өмнөх оролдлогын screenshot хаана ч холбогдохгүй (ж: түр 503-ын дараа Pass)
+                (self.run_dir / r.screenshot).unlink(missing_ok=True)
             try:
                 await self._ensure_ready(item.name)
                 r, flags = await asyncio.wait_for(self._check_once(item, attempt, deploy_retried), timeout)
@@ -558,7 +601,7 @@ class SmokeRunner:
                 # тусад нь илрүүлдэг): сэргээгээд 1 удаа дахин шалгана; хоёр дахь удаа ч бол «шалгагдаагүй (хэрэгсэл)»
                 r = ItemResult(item, status=M.BLOCKED, attempts=attempt, checked_at=now_iso(),
                                blocked_reason=f"Хэрэгслийн шалгалтын хугацаа хэтэрсэн ({timeout} сек)")
-                r.screenshot = await self._screenshot(self._shot_name())
+                r.screenshot = await self._screenshot(self._shot_name(), self._caption(item, r.blocked_reason))
                 flags = _Flags()
                 await self._recover_after_timeout(item)
                 if attempt < 2 and not self.cancel_event.is_set():
@@ -607,8 +650,6 @@ class SmokeRunner:
             await wait_login_or_app(self.page, self.cfg, self.cfg["timing"]["app_ready_timeout_ms"],
                                     self.cancel_event)
             self.current_module = None
-        if confirm:
-            r.screenshot = ""
         return r
 
     async def _recover_after_timeout(self, item: MenuItem) -> None:
@@ -769,6 +810,9 @@ class SmokeRunner:
                 r.findings.append(classify_popup(d, cfg, is_toast=False))
             for t in st.toasts:
                 r.findings.append(classify_popup(t, cfg, is_toast=True))
+            if not flags.crash and not flags.reload:
+                for e in await error_pages(page, cfg):
+                    r.findings.append(Finding(M.SYSTEM_ERROR, dialog_text(e)[:500], detail=ERROR_PAGE_DETAIL))
             forbidden = st.forbidden or r.tab_name == self.sel["forbidden_tab_name"]
             if forbidden:
                 r.findings.append(Finding(M.FORBIDDEN, "Sorry, you are not authorized to access this page (403)"))
@@ -804,9 +848,11 @@ class SmokeRunner:
         # e. screenshot (модал/таб хаагдахаас өмнө). Сүлжээ/консолын алдаа (HTTP 4xx/5xx, console error) нь
         # доор табыг хаасны ДАРАА цуглуулагддаг тул энд урьдчилан шалгана — эс бөгөөс зөвхөн ийм алдаатай цэс
         # (ж: тайлангийн CSS 404) screenshot-гүй үлддэг байсан
-        net_err = bool(self.col.findings_from(self.col.since(t_click), include_deploy=deploy_retry))
+        net_err = self.col.findings_from(self.col.since(t_click), include_deploy=deploy_retry)
         if r.findings or flags.crash or net_err:
-            r.screenshot = await self._screenshot(self._shot_name())
+            what = ".NET runtime уналт — апп зогссон" if flags.crash and not r.findings else ""
+            r.screenshot = await self._screenshot(self._shot_name(),
+                                                  self._caption(item, what, r.findings or net_err))
             self._lap("shot")
 
         # f. хаах → хоцорсон уналт
@@ -829,7 +875,8 @@ class SmokeRunner:
                 for d in st2.dialogs:
                     r.findings.append(replace(classify_popup(d, cfg, is_toast=False), after_close=True))
                 if not r.screenshot:
-                    r.screenshot = await self._screenshot(self._shot_name())
+                    r.screenshot = await self._screenshot(
+                        self._shot_name(), self._caption(item, "таб хаасны дараа алдааны цонх гарсан"))
                 await self._close_dialogs()
             if st2 and is_login_url(st2.url, cfg):
                 flags.logout_after_close = True
@@ -840,7 +887,8 @@ class SmokeRunner:
             if self.col.has_crash(self.col.since(t_close)):
                 flags.crash = True
                 if not r.screenshot:
-                    r.screenshot = await self._screenshot(self._shot_name())
+                    r.screenshot = await self._screenshot(
+                        self._shot_name(), self._caption(item, "таб хаасны дараа .NET runtime уналт"))
 
         self._lap("after_close")
         await self.col.drain()

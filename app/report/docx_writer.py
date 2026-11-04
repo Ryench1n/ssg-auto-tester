@@ -357,16 +357,18 @@ def build_context(tpl: DocxTemplate | None, run: RunData, tcs: list[TestCase], b
     details = []
     if appendix:
         for b in bugs:
-            img = ""
+            img = img2 = ""
             if tpl is not None and b.screenshot and (run_dir / b.screenshot).exists():
                 img = InlineImage(tpl, str(run_dir / b.screenshot), width=Mm(150))
+            if tpl is not None and b.confirm_screenshot and (run_dir / b.confirm_screenshot).exists():
+                img2 = InlineImage(tpl, str(run_dir / b.confirm_screenshot), width=Mm(150))
             details.append({
                 "id": b.bug_id, "title": b.title, "sev": b.severity.docx, "status": b.status,
                 "modules": ", ".join(b.modules) or "—", "confirmed": b.confirmed or "—",
                 "tcs": _tcs_short(b.tc_ids, 30),
                 "steps": Listing(b.steps), "expected": b.expected, "actual": Listing(b.actual),
                 "stack": Listing(b.stack) if b.stack else "—", "fix": b.fix,
-                "security": b.security_note, "image": img,
+                "security": b.security_note, "image": img, "image2": img2,
             })
 
     url_ver = f"{run.url}" + (f", хувилбар {run.app_version}" if run.app_version else "")

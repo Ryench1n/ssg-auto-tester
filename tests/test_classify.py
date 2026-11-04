@@ -156,3 +156,73 @@ def test_dependent_steps_are_not_separate_blocked_tcs():
              st(3, M.BLOCKED, "Өмнөх алхам #2 (Хайх) Blocked"), st(5, M.BLOCKED, "Шаардлагатай өгөгдөл алга: a01_rec"),
              st(7, M.BLOCKED, "Тестийн өгөгдөл үлдсэн (гараар устгана уу)"), st(8, M.PASS)]
     assert [dependent_root(s, steps) for s in steps] == [None, 1, 1, 1, None, None]
+
+
+def test_static_asset_detection():
+    from app.runner.detectors import is_asset
+    assert is_asset("stylesheet", "https://x/_content/DevExpress.Blazor.Reporting.Viewer/css/viewer.bs5.css")
+    assert is_asset("", "https://x/reportviewer/_content/DevExpress.Blazor.Resources/dx-blazor.svg")
+    assert is_asset("", "https://x/css/democenter-ui.css?v=2")
+    assert not is_asset("fetch", "https://x/api/menus")
+    assert not is_asset("script", "https://x/_framework/blazor.webassembly.js")
+
+
+def test_missing_asset_does_not_fail_menu():
+    from app.models import ItemResult, MenuItem
+    from app.runner.smoke import smoke_status
+    r = ItemResult(MenuItem("Тайлан", "", "Бэлнээр цалин олгох тайлан", "/r"),
+                   findings=[Finding(M.ASSET_4XX, "HTTP 404 (статик файл)", status=404, url="https://x/a.css")])
+    assert smoke_status(r, {}) == M.PASS
+    r.findings.append(Finding(M.HTTP_4XX, "HTTP 404", status=404, url="https://x/api/report"))
+    assert smoke_status(r, {}) == M.FAIL
+
+
+def test_rebuild_reclassifies_legacy_static_404(tmp_path):
+    """Хуучин raw.json: статик CSS 404-өөр Fail болсон цэс дахин тооцоход Pass + анхааруулга (testbalancelite)."""
+    import json
+    from app.report.rebuild import load_run
+    raw = {"run_id": "r1", "project": "P", "url": "https://testbalancelite.smartapp.mn", "results": [
+        {"item": {"module": "Тайлан", "folder": "", "name": "НД7", "href": "/r"}, "status": M.FAIL,
+         "findings": [{"kind": M.HTTP_4XX, "text": "HTTP 404", "status": 404,
+                       "url": "https://testbalancelite.smartapp.mn/_content/X.Viewer/css/viewer.bs5.css"}]},
+        {"item": {"module": "Тайлан", "folder": "", "name": "API", "href": "/a"}, "status": M.FAIL,
+         "findings": [{"kind": M.HTTP_4XX, "text": "HTTP 404", "status": 404,
+                       "url": "https://testbalancelite.smartapp.mn/api/report"}]}]}
+    p = tmp_path / "raw.json"
+    p.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    a, b = load_run(p).results
+    assert a.status == M.PASS and a.findings[0].kind == M.ASSET_4XX
+    assert b.status == M.FAIL and b.findings[0].kind == M.HTTP_4XX
+
+
+def test_in_tab_error_page_title():
+    from app.runner.classify.severity import title_for
+    from app.runner.detectors import ERROR_PAGE_DETAIL
+    f = Finding(M.SYSTEM_ERROR, "Системийн алдаа\nObject of type 'SLRangePicker' does not have a property 'Enabled'.",
+                detail=ERROR_PAGE_DETAIL)
+    assert title_for(f).startswith("Цэсийн таб дотор системийн алдааны хуудас гарна")
+    assert title_for(Finding(M.SYSTEM_ERROR, "Системийн алдаа\nX")).startswith("Системийн алдааны цонх гарна")
+
+
+def test_adopt_legacy_confirm_shots(tmp_path):
+    """Хуучин run: давтан шалгалтын item-*.png-ийг run.log-ийн «⏱ <цэс>» цагаар Fail цэст нь хавсаргана."""
+    import os
+    from datetime import datetime
+    from app.models import ItemResult, MenuItem
+    from app.report.rebuild import adopt_confirm_shots
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "run.log").write_text("\n".join([
+        "2026-11-03T16:31:40 [INFO] ⏱ А: 1.0с | click=0.1",                       # үндсэн давталт — тооцохгүй
+        "2026-11-03T16:31:40 [INFO] Давтан баталгаажуулалт: 3 Fail цэс",
+        "2026-11-03T16:31:42 [INFO] ⏱ А: 2.2с | click=0.3",                       # А — screenshot-гүй
+        "2026-11-03T16:31:43 [INFO] ⏱ Б: 1.5с | shot=0.05",
+        "2026-11-03T16:31:47 [INFO] ⏱ В: 3.0с | click=0.2",                       # В — 2 оролдлого
+        "2026-11-03T16:31:49 [INFO] ⏱ В: 2.0с | shot=0.2"]), encoding="utf-8")
+    ts = lambda s: datetime.fromisoformat(f"2026-11-03T{s}").timestamp()
+    for name, t in (("item-0016", "16:31:43.15"), ("item-0017", "16:31:48.90")):
+        p = tmp_path / "shots" / f"{name}.png"
+        p.write_bytes(b"png")
+        os.utime(p, (ts(t), ts(t)))
+    rs = [ItemResult(MenuItem("M", "", n, f"/{n}"), status=M.FAIL, confirmation="Баталгаажсан (2/2)") for n in "АБВ"]
+    assert adopt_confirm_shots(tmp_path, rs) == 2
+    assert [r.confirm_screenshot for r in rs] == ["", "shots/item-0016.png", "shots/item-0017.png"]

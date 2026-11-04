@@ -319,6 +319,10 @@ def build(src: Path = SRC, dst: Path = DST) -> Path:
     ins(body, "{%p if b.image %}")
     ins(body, "{{ b.image }}")
     ins(body, "{%p endif %}")
+    ins(body, "{%p if b.image2 %}")
+    ins(body, "Давтан шалгалт (2 дахь оролдлого):")
+    ins(body, "{{ b.image2 }}")
+    ins(body, "{%p endif %}")
     ins(body, "{%p endfor %}")
     ins(body, "{%p endif %}")
 

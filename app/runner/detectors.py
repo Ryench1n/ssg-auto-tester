@@ -67,9 +67,10 @@ const __findDialogs = (sel) => {
 };
 """
 
-STATE_JS = r"""
-(sel) => {
-  /*__DIALOGS__*/
+# Элементийн харагдах эсэх ба текст. Цонхны текстээс товчны шошгыг (OK / Хадгалах ...) хасна — bug гарчиг цэвэр байх.
+# cloneNode ХЭРЭГЛЭХГҮЙ: DevExpress custom element-ийг хуулахад attributeChangedCallback-аас
+# «Error: readonly» консол алдаа үүсч (хэрэгслийн өөрийн үүсгэсэн хуурамч алдаа) тайланд ордог байсан.
+DTXT_FN = r"""
   const vis = (el) => {
     if (!el) return false;
     const s = getComputedStyle(el);
@@ -79,14 +80,6 @@ STATE_JS = r"""
   };
   const txt = (el) => (el.innerText || el.textContent || '').replace(/[ \t\u00a0]+/g, ' ')
       .replace(/\s*\n\s*/g, '\n').trim();
-  const q = (s) => { try { return Array.from(document.querySelectorAll(s)); } catch (e) { return []; } };
-  const tabs = q(sel.tab).filter(vis).map(t => ({
-    text: txt(t).split('\n')[0].trim(),
-    active: t.matches(sel.tab_active) || t.getAttribute('aria-selected') === 'true'
-  }));
-  // Цонхны текстээс товчны шошгыг (OK / Хадгалах ...) хасна — bug гарчиг цэвэр байх.
-  // cloneNode ХЭРЭГЛЭХГҮЙ: DevExpress custom element-ийг хуулахад attributeChangedCallback-аас
-  // «Error: readonly» консол алдаа үүсч (хэрэгслийн өөрийн үүсгэсэн хуурамч алдаа) тайланд ордог байсан.
   const BLOCK = /^(DIV|P|TR|LI|UL|OL|TABLE|TBODY|SECTION|HEADER|FOOTER|H[1-6]|BR|LABEL|FORM)$/;
   const dtxt = (d) => {
     const parts = []; let n = 0;
@@ -103,6 +96,17 @@ STATE_JS = r"""
     walk(d);
     return parts.join('').replace(/[ \t ]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim() || txt(d);
   };
+"""
+
+STATE_JS = r"""
+(sel) => {
+  /*__DIALOGS__*/
+  /*__DTXT__*/
+  const q = (s) => { try { return Array.from(document.querySelectorAll(s)); } catch (e) { return []; } };
+  const tabs = q(sel.tab).filter(vis).map(t => ({
+    text: txt(t).split('\n')[0].trim(),
+    active: t.matches(sel.tab_active) || t.getAttribute('aria-selected') === 'true'
+  }));
   const dialogs = __findDialogs(sel).map(dtxt).filter(Boolean);
   const toasts = q(sel.toast).filter(vis).map(txt).filter(Boolean);
   // <dxbl-loading-panel> нь агуулгыг ороосон wrapper тул үргэлж DOM-д, бүтэн хэмжээгээрээ
@@ -136,7 +140,44 @@ STATE_JS = r"""
     hasPassword: !!document.querySelector(sel.password),
   };
 }
-""".replace("/*__DIALOGS__*/", DIALOGS_FN)
+""".replace("/*__DIALOGS__*/", DIALOGS_FN).replace("/*__DTXT__*/", DTXT_FN)
+
+# Таб доторх алдааны хуудас (Blazor ErrorBoundary): цонх биш — табын агуулгыг бүхэлд нь «Системийн алдаа» гарчиг +
+# мессеж + «Дахин ачаалах» товчоор орлуулдаг. Зөвхөн консолын «ErrorBoundary» мөрөөр (Minor) бүртгэгдэж, цонхны
+# toast-ын текст bug болдог байсан (testretail «Хугацаат ажлын дэлгэрэнгүй жагсаалт», 2026-11-03). Цонх/toast/цэс/
+# таб/хүснэгтээс гадуурх, текст нь гарчигтай яг таарсан харагдах элементийг олж мессежтэй нь (товчгүй) авна.
+# Цэс бүрт нэг л удаа (DOM цуглуулах үед) дуудна — snapshot-ын polling-д оруулахгүй.
+ERROR_PAGE_JS = r"""
+(sel) => {
+  /*__DTXT__*/
+  const titles = sel.titles || [];
+  const out = [];
+  if (!titles.length || !document.body) return out;
+  const skip = [sel.dialog, sel.toast, sel.menu_root, sel.tab, 'table', '[role=grid]', '[role=row]']
+      .filter(Boolean).join(',');
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let n; let k = 0;
+  while ((n = walker.nextNode()) && k < 20000) {
+    k++;
+    const v = (n.nodeValue || '').trim();
+    if (!v || !titles.includes(v)) continue;
+    const el = n.parentElement;
+    if (!el || !vis(el)) continue;
+    try { if (el.closest(skip)) continue; } catch (e) { continue; }
+    // Гарчгаас дээш мессежийг агуулсан хамгийн ойрын блок (≤ 4 түвшин, ≤ 800 тэмдэгт)
+    let box = el; let text = '';
+    for (let i = 0; i < 4 && box.parentElement; i++) {
+      box = box.parentElement;
+      const t = dtxt(box);
+      if (t.length > 800) break;
+      // гарчгаас өмнөх дүрсний тэмдэгт («!») орохгүй — гарчгаас эхлүүлнэ
+      if (t.length > v.length + 3) { text = t.slice(Math.max(0, t.indexOf(v))); break; }
+    }
+    if (text && !out.includes(text)) out.push(text);
+  }
+  return out;
+}
+""".replace("/*__DTXT__*/", DTXT_FN)
 
 
 @dataclass
@@ -179,6 +220,20 @@ async def snapshot(page, cfg: dict) -> PageState | None:
         return None
 
 
+ERROR_PAGE_DETAIL = "Таб доторх алдааны хуудас (ErrorBoundary)"
+
+
+async def error_pages(page, cfg: dict) -> list[str]:
+    """Таб доторх «Системийн алдаа» хуудсуудын текст (гарчиг + мессеж)."""
+    s = cfg["selectors"]
+    arg = {"titles": (cfg.get("detect") or {}).get("error_page_titles") or [],
+           "dialog": s["dialog"], "toast": s["toast"], "menu_root": s.get("menu_root", ""), "tab": s["tab"]}
+    try:
+        return await page.evaluate(ERROR_PAGE_JS, arg) or []
+    except Exception:
+        return []
+
+
 # --------------------------------------------------------------------------
 # Нууц мэдээлэл шүүх
 # --------------------------------------------------------------------------
@@ -208,6 +263,15 @@ def strip_query(url: str) -> str:
         return urlunparse((p.scheme, p.netloc, p.path, "", "", ""))
     except Exception:
         return url
+
+
+_ASSET_TYPES = {"stylesheet", "image", "font", "media"}
+_ASSET_EXT = re.compile(r"\.(css|png|jpe?g|gif|svg|ico|webp|bmp|woff2?|ttf|otf|eot|map)$", re.I)
+
+
+def is_asset(resource_type: str, url: str) -> bool:
+    """Загвар/зураг/фонт мэт статик файл — дутуу байсан ч хуудас ажилладаг (JS/API биш)."""
+    return resource_type in _ASSET_TYPES or bool(_ASSET_EXT.search(urlparse(url or "").path))
 
 
 def _retryable(e: dict) -> bool:
@@ -321,8 +385,12 @@ class Collector:
         url = resp.url
         if self._ignored(url):
             return
+        try:
+            rtype = resp.request.resource_type
+        except Exception:
+            rtype = ""
         ev = {"type": "http", "status": status, "url": url, "text": f"HTTP {status}", "deploy": False,
-              "speculative": False}
+              "speculative": False, "asset": is_asset(rtype, url)}
         self._push(ev)
         task = asyncio.ensure_future(self._inspect(resp, ev))
         self._tasks.add(task)
@@ -398,6 +466,9 @@ class Collector:
                     f = Finding(M.AUTH_ERROR, f"HTTP {st} {e['url']}", status=st, url=e["url"])
                 elif st == 403:
                     f = Finding(M.FORBIDDEN, f"HTTP 403 {strip_query(e['url'])}", status=st, url=e["url"])
+                elif e.get("asset"):
+                    # Дутуу CSS/зураг/фонт — хуудас ажиллаж байгаа тул цэсийг Fail болгохгүй (soft_findings)
+                    f = Finding(M.ASSET_4XX, f"HTTP {st} (статик файл)", status=st, url=e["url"], after_close=after)
                 else:
                     f = Finding(M.HTTP_4XX, f"HTTP {st}", status=st, url=e["url"], after_close=after)
             if f is None:

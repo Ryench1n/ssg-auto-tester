@@ -56,10 +56,16 @@ const MODULES = {
       {name: 'Эрсдэлийн бүртгэл', href: '/sys/risk', kind: 'dx_modal'},
       {name: 'Сесс шалгах', href: '/sys/session', kind: 'ok'},
       {name: 'Дансны жагсаалт', href: '/gl/accounts', kind: 'sql_modal'},
+      {name: 'Хугацаат ажил', href: '/sys/jobs', kind: 'error_page'},
     ]},
   ],
 };
 
+// Blazor ErrorBoundary: цонх биш — табын агуулгыг бүхэлд нь орлох алдааны хуудас (testretail «Хугацаат ажлын …»)
+const ERROR_PAGE = `<div class="error-boundary" style="text-align:center;padding:40px">
+  <div style="color:#c00;font-size:28px">!</div><h4>Системийн алдаа</h4>
+  <div>Object of type 'SmartSoftware.WAF.Controls.Inherited.SLRangePicker' does not have a property matching the name 'Enabled'.</div>
+  <button>Дахин ачаалах</button> <button>Хаах</button></div>`;
 let dead = false;             // .NET runtime уналтын дараа UI хариу өгөхгүй
 // 'Эхлэл' — анхнаасаа нээлттэй, хаах товчтой таб (Restaurant-ийн "Систем" таб шиг): smoke хаах ёсгүй
 let tabs = [{name: 'Нүүр хуудас', protected: true}, {name: 'Эхлэл', initial: true}];
@@ -127,7 +133,8 @@ function render() {
   content.appendChild(tb);
   const body = tabs.find(t => t.name === active);
   content.appendChild($(`<div class="tab-body">${body && body.blank ? '' : body && body.forbidden ?
-    'Sorry, you are not authorized to access this page' : (active + ' — жагсаалт')}</div>`));
+    'Sorry, you are not authorized to access this page' : body && body.errorPage ? ERROR_PAGE :
+    (active + ' — жагсаалт')}</div>`));
   layout.appendChild(content);
   root.appendChild(layout);
   if (body && body.modal) root.appendChild(body.modal);
@@ -221,6 +228,9 @@ function openItem(it) {
     }
     case 'forbidden':
       addTab({name: '_403', forbidden: true}); break;
+    case 'error_page':
+      console.error('fail: Microsoft.AspNetCore.Components.Web.ErrorBoundary[0]');
+      addTab({name: it.name, errorPage: true}); break;
   }
 }
 

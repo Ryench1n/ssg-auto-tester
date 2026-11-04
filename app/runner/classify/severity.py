@@ -7,6 +7,7 @@ from app import models as M
 from app.models import Finding
 from app.runner.severity import Severity
 from app.runner.classify.signature import _url_pattern, first_exception_line
+from app.runner.detectors import ERROR_PAGE_DETAIL
 
 
 # --------------------------------------------------------------------------
@@ -31,6 +32,7 @@ BASE_SEVERITY = {
     M.NO_TAB: Severity.MINOR,
     M.WARNING_TOAST: Severity.MINOR,
     M.HTTP_4XX: Severity.MINOR,
+    M.ASSET_4XX: Severity.MINOR,
     M.FLOW_STEP_FAIL: Severity.MAJOR,
     M.BLANK_PAGE: Severity.MAJOR,
     M.SLOW_LOAD: Severity.MINOR,
@@ -117,6 +119,8 @@ def title_for(f: Finding) -> str:
     if k == M.PAGE_RELOAD:
         return "Цэс нээхэд SPA бүтэн дахин ачаалагдаж, нээлттэй табууд алдагдана"
     if k == M.SYSTEM_ERROR:
+        if f.detail == ERROR_PAGE_DETAIL:
+            return f"Цэсийн таб дотор системийн алдааны хуудас гарна: {short}"
         return f"Системийн алдааны цонх гарна: {short}"
     if k == M.HTTP_5XX:
         return f"Сервер HTTP {f.status} алдаа буцаана: {_url_pattern(f.url)}"
@@ -140,6 +144,8 @@ def title_for(f: Finding) -> str:
         return f"Цэс нээгдэхэд шууд анхааруулга гарна: {short}"
     if k == M.HTTP_4XX:
         return f"HTTP {f.status} хариу: {_url_pattern(f.url)}"
+    if k == M.ASSET_4XX:
+        return f"Статик файл олдохгүй (HTTP {f.status}): {_url_pattern(f.url)}"
     if k == M.FLOW_STEP_FAIL:
         return f"E2E урсгалын алхам амжилтгүй: {short}"
     if k == M.BLANK_PAGE:
@@ -185,6 +191,8 @@ def fix_for(f: Finding) -> str:
         return "Серверийн exception-ийг засаж, хэрэглэгчид ойлгомжтой мессеж харуулах"
     if f.kind == M.BLANK_PAGE:
         return "Компонентын рендер / өгөгдөл ачааллын алдааг (консол, сүлжээ) шалгах; ErrorBoundary-ээр алдааг харуулах"
+    if f.kind == M.ASSET_4XX:
+        return "Deploy-д статик файл (CSS/зураг/фонт) хуулагдсан эсэх, эсвэл ашиглаагүй файл руу холбоос үлдсэн эсэхийг шалгах"
     if f.kind == M.SLOW_LOAD:
         return "Цэсийн анхны ачааллын хүсэлтүүдийг (query, lookup) оновчлох, шаардлагагүй ачааллыг хойшлуулах"
     if f.kind == M.FLOW_STEP_FAIL:

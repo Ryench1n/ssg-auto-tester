@@ -43,17 +43,28 @@ def ensure_docx_template() -> Path:
     return DOCX_TPL
 
 
+def _move_shot(run_dir: Path, rel: str, name: str) -> str:
+    src = run_dir / rel
+    dst = run_dir / "shots" / f"{name}.png"
+    if src.exists() and src != dst:
+        os.replace(src, dst)
+    # Windows дээр Path нь "\\" ашигладаг — URL/JSON-д үргэлж "/" байх ёстой.
+    return dst.relative_to(run_dir).as_posix() if dst.exists() else ""
+
+
 def _rename_shots(run_dir: Path, tcs) -> None:
     """item-0001.png → TC-xxx-001.png (TC ID ангиллын дараа тодорхой болдог)."""
     for tc in tcs:
-        if not tc.screenshot:
-            continue
-        src = run_dir / tc.screenshot
-        dst = run_dir / "shots" / f"{tc.tc_id}.png"
-        if src.exists() and src != dst:
-            os.replace(src, dst)
-        # Windows дээр Path нь "\\" ашигладаг — URL/JSON-д үргэлж "/" байх ёстой.
-        tc.screenshot = dst.relative_to(run_dir).as_posix() if dst.exists() else ""
+        if tc.screenshot:
+            tc.screenshot = _move_shot(run_dir, tc.screenshot, tc.tc_id)
+
+
+def _rename_confirm_shots(run_dir: Path, run: RunData, tcs) -> None:
+    """Давтан баталгаажуулалтын screenshot → TC-xxx-001-2.png (урьд нь хаана ч холбогдоогүй үлддэг байсан)."""
+    tc_id = {tc.menu_key: tc.tc_id for tc in tcs}
+    for r in run.results:
+        if r.confirm_screenshot and r.item.key in tc_id:
+            r.confirm_screenshot = _move_shot(run_dir, r.confirm_screenshot, f"{tc_id[r.item.key]}-2")
 
 
 def smoke_compare(run: RunData, prev: dict | None) -> dict:
@@ -181,6 +192,7 @@ def generate_reports(run: RunData, cfg: dict, run_dir: Path, verify: bool = True
     for tc in tcs:
         tc.screenshot = shot_by_key.get(tc.menu_key, tc.screenshot)   # flow TC-ийнх аль хэдийн бий
     _rename_shots(run_dir, tcs)
+    _rename_confirm_shots(run_dir, run, tcs)
     new_shot = {tc.menu_key: tc.screenshot for tc in tcs}
     for r in run.results:
         r.screenshot = new_shot.get(r.item.key, r.screenshot)
@@ -246,7 +258,8 @@ def generate_reports(run: RunData, cfg: dict, run_dir: Path, verify: bool = True
                   for f in run.flows],
         "bugs": [{"id": b.bug_id, "severity": b.severity.xlsx, "title": b.title, "tcs": b.tc_ids,
                   "modules": b.modules, "signature": b.signature, "fix": b.fix,
-                  "confirmed": b.confirmed, "screenshot": b.screenshot, "actual": b.actual,
+                  "confirmed": b.confirmed, "screenshot": b.screenshot,
+                  "confirm_screenshot": b.confirm_screenshot, "actual": b.actual,
                   "stack": b.stack, "security": b.security_note} for b in bugs],
         "tcs": [{"id": t.tc_id, "module": t.module, "purpose": t.purpose, "priority": t.priority,
                  "result": t.result, "bugs": t.bug_ids, "note": t.note, "screenshot": t.screenshot}

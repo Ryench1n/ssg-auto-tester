@@ -31,7 +31,7 @@ def _short_note(r: ItemResult) -> str:
         parts.append(r.blocked_reason)
     for f in r.findings:
         t = (f.text or f.kind).replace("\n", " ").strip()
-        if f.kind in (M.HTTP_5XX, M.HTTP_4XX):
+        if f.kind in (M.HTTP_5XX, M.HTTP_4XX, M.ASSET_4XX):
             t = f"HTTP {f.status} {_url_pattern(f.url)}"
         elif f.kind == M.RUNTIME_CRASH:
             t = "Runtime уналт: " + first_exception_line(f.detail or f.text)

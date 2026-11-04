@@ -900,6 +900,11 @@ $('btnStop').onclick = async () => {
 };
 
 let TCS = [];
+const shotLink = (p) => {
+  if (!p) return '';
+  const u = `/runs/${runId}/shots/${encodeURIComponent(p.split('/').pop())}`;
+  return `<a href="${u}" target="_blank"><img class="shot" src="${u}"></a>`;
+};
 function showResult(s, status, error) {
   $('cardRes').classList.remove('hidden');
   $('resWarn').textContent = error ? '⚠ ' + error : (status === 'cancelled' ? 'Run зогсоогдсон — хэсэгчилсэн үр дүн.' : '');
@@ -956,7 +961,7 @@ function showResult(s, status, error) {
     <td>${esc(b.title)}${b.confirmed ? `<div class="muted">${esc(b.confirmed)}</div>` : ''}${b.security ? `<div class="warn">${esc(b.security)}</div>` : ''}
     ${b.stack ? `<pre class="stack">${esc(b.stack)}</pre>` : ''}</td>
     <td>${esc(b.tcs.slice(0, 12).join(', '))}${b.tcs.length > 12 ? ` … (+${b.tcs.length - 12})` : ''}</td><td>${esc(b.fix)}</td>
-    <td>${b.screenshot ? `<a href="/runs/${runId}/shots/${b.screenshot.split('/').pop()}" target="_blank"><img class="shot" src="/runs/${runId}/shots/${b.screenshot.split('/').pop()}"></a>` : ''}</td></tr>`).join('')
+    <td>${shotLink(b.screenshot)}${b.confirm_screenshot ? `<div class="muted" style="margin-top:6px">Давтан шалгалт (2 дахь оролдлого)</div>${shotLink(b.confirm_screenshot)}` : ''}</td></tr>`).join('')
     : '<tr><td colspan="6" class="muted">Bug илрээгүй</td></tr>';
   TCS = s.tcs;
   const mods = [...new Set(TCS.map(t => t.module))];

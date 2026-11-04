@@ -1,12 +1,58 @@
 """raw.json-оос RunData-г сэргээх — сервер тайлан үүсгэж байх үед хаагдсан (эсвэл тайлангийн алдаатай) run-ын
-тайланг дахин үүсгэхэд."""
+тайланг дахин үүсгэхэд.
+
+Гараар (тайланг одоогийн ангиллын дүрмээр дахин үүсгэнэ; xlsx/docx/summary/screenshot zip дарагдана):
+    python -m app.report.rebuild <run_id> [<run_id> ...]
+"""
 from __future__ import annotations
 
 import dataclasses
 import json
+import re
+import sys
+from datetime import datetime
 from pathlib import Path
 
 from app import models as M
+
+_LAP = re.compile(r"^(\S+) \[\w+\] ⏱ (.+?): [\d.]+с \|")
+
+
+def adopt_confirm_shots(run_dir: Path, results: list[M.ItemResult]) -> int:
+    """Хуучин run (2026-11-04-өөс өмнөх): давтан баталгаажуулалтын screenshot (item-*.png) аль ч TC-д холбогдоогүй,
+    raw.json-д ч бүртгэгдээгүй. run.log-ийн давтан шалгалтын «⏱ <цэс>» мөрийн (цэс бүрийн шалгалт дууссан) цагийг
+    файлын цагтай тулгаж Fail цэст нь хавсаргана: screenshot нь тухайн цэсийн шалгалт дуусахаас өмнө авагдана.
+    Хавсаргасан тоог буцаана."""
+    run_dir = Path(run_dir)
+    log = run_dir / "run.log"
+    orphans = sorted((run_dir / "shots").glob("item-*.png"))
+    if not log.exists() or not orphans or any(r.confirm_screenshot for r in results):
+        return 0
+    lines = log.read_text(encoding="utf-8", errors="ignore").splitlines()
+    start = next((i for i, l in enumerate(lines) if "Давтан баталгаажуулалт:" in l), None)
+    if start is None:
+        return 0
+    laps = [(datetime.fromisoformat(m.group(1)).timestamp(), m.group(2))
+            for m in map(_LAP.match, lines[start + 1:]) if m]
+    # Давтан шалгалт нь Fail цэсүүдийг results-ийн дарааллаар явна; нэг цэс дахин оролдвол хэд хэдэн ⏱ мөртэй
+    ends: list[tuple[float, M.ItemResult]] = []
+    i = 0
+    for r in (x for x in results if x.confirmation):
+        last = None
+        while i < len(laps) and laps[i][1] == r.item.name:
+            last = laps[i][0]
+            i += 1
+        if last is not None:
+            ends.append((last, r))
+    n = 0
+    for p in orphans:
+        t = p.stat().st_mtime
+        # лог секундээр таслагдсан — дуусах цаг [ts, ts+1) хооронд; screenshot нь түүнээс өмнө
+        r = next((r for end, r in ends if t < end + 1 and not r.confirm_screenshot), None)
+        if r is not None:
+            r.confirm_screenshot = p.relative_to(run_dir).as_posix()
+            n += 1
+    return n
 
 
 def _mk(cls, data: dict):
@@ -57,7 +103,7 @@ def load_run(raw_path: Path) -> M.RunData:
     from app.runner.detectors import tab_mismatch_finding
     from app.runner.smoke import smoke_status
     from app.config import load_config
-    from app.runner.detectors import classify_popup
+    from app.runner.detectors import classify_popup, is_asset
     try:
         cfg = load_config(d.get("url"))
     except Exception:
@@ -68,6 +114,9 @@ def load_run(raw_path: Path) -> M.RunData:
                 nf = classify_popup(f.text, cfg, False)       # одоогийн ангилал («Анхаар … тохиргоо» цонх)
                 if nf.kind != f.kind:
                     r.findings[i] = f = nf
+            if f.kind == M.HTTP_4XX and is_asset("", f.url):
+                # Хуучин run: дутуу CSS/зураг/фонт нь цэсийг Fail болгодог байсан → анхааруулга (asset_4xx)
+                r.findings[i] = f = dataclasses.replace(f, kind=M.ASSET_4XX, text=f"HTTP {f.status} (статик файл)")
             m = re.match(r"Таб: «(.*)» ≠ цэс: «(.*?)»", f.text or "") if f.kind == M.TAB_NAME_MISMATCH else None
             if m and "—" not in f.text:
                 r.findings[i] = tab_mismatch_finding(m.group(1), m.group(2))
@@ -118,3 +167,36 @@ def _flow_status(steps: list[dict]) -> str:
     if M.NOT_TESTED in sts:
         return M.NOT_TESTED
     return M.PASS if sts else M.NA
+
+
+def rebuild(run_id: str) -> dict:
+    """Run-ын тайланг raw.json-оос одоогийн дүрмээр дахин үүсгэж Түүхийн (runs.db) мэдээллийг шинэчилнэ."""
+    from app.api import RUNS_DIR, _previous_summary, store
+    from app.config import load_config
+    from app.report.build import generate_reports
+    run_dir = RUNS_DIR / run_id
+    data = load_run(run_dir / "raw.json")
+    adopted = adopt_confirm_shots(run_dir, data.results)
+    summary = generate_reports(data, load_config(data.url), run_dir, False,
+                               _previous_summary(run_id, data.url, data.flows))
+    summary["pipeline"] = data.pipeline
+    stats = summary.get("stats") or {}
+    store.update(run_id, decision=summary.get("decision"), pass_rate=stats.get("pass_rate"),
+                 total=stats.get("total"), summary=summary)
+    summary["adopted_shots"] = adopted
+    return summary
+
+
+def main(argv: list[str] | None = None) -> None:
+    ids = (argv if argv is not None else sys.argv[1:])
+    if not ids:
+        print(__doc__)
+        raise SystemExit(2)
+    for rid in ids:
+        s = rebuild(rid)
+        print(f"{rid}: {s['decision']} · Pass Rate {s['stats']['pass_rate']}% · bug {s['bug_counts']['total']}"
+              + (f" · давтан шалгалтын {s['adopted_shots']} screenshot хавсаргав" if s["adopted_shots"] else ""))
+
+
+if __name__ == "__main__":
+    main()
