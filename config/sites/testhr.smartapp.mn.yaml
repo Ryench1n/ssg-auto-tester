@@ -1,0 +1,166 @@
+# testhr.smartapp.mn — бизнес процессын E2E (UI: «Бизнес процессын E2E» карт)
+#   python -m app.flows --url https://testhr.smartapp.mn/ --flow "H1: Ажилтан авах → Гэрээ → Цалин"
+# Нэвтрэлт ЗӨВХӨН гараар. Цэс, багана, форм нь 2026-11-05-ны run-ын (4d11797caf7d) бүртгэлээс.
+# ⚠ Калибровк явагдаж байна: 2026-11-05-нд ажилтан хүртэл бодит testhr дээр ажилласан, цэвэрлэгээ бүрэн;
+#   гэрээ (+1), цалин (+1 500 000) мөн ажилласан; бүрэн цэвэрлэгээг бүлэглэсэн цалингийн жагсаалтын засварын дараа шалгана.
+flows:
+  # Бие даасан: тест өөрийн хэлтэс, албан тушаал, гэрээний төрөл, ажилтныг ({run_tag}01/02/06/03) үүсгэж, тэр ажилтанд
+  # гэрээ, цалин бүртгэнэ. Гэрээний төрөл: тест орчинд огт бүртгэлгүй («мөр олдсонгүй», 2026-11-05).
+  # Oracle (жагсаалтаас уншиж Δ-г шалгана — нийтлэг тест орчинд бусдын өгөгдөл нөлөөлөхгүй):
+  #   - «Ажилтны жагсаалт»: ажилтны код {run_tag}03 мөрийн тоо +1
+  #   - «Гэрээний жагсаалт»: тухайн ажилтны гэрээний тоо +1
+  #   - «Цалингийн жагсаалт»: тухайн ажилтны Σ «Үндсэн цалин» +1 500 000
+  # Цэвэрлэгээ (always) — эсрэг дарааллаар: цалин → гэрээ → ажилтан → албан тушаал → хэлтэс → гэрээний төрөл; Δ = 0.
+  # Бодит ажилтан, хэлтэст хүрэхгүй: run_tag-тай сонголт олдохгүй бол бодит бичлэгээр ОРЛУУЛАХГҮЙ (Not Tested).
+  # Цалин, гэрээний жагсаалтад баримтын дугаарын багана алга тул тэдгээрийг ажилтны кодоор (find) олж устгана.
+  # «Албан тушаал»-ын ЗАСВАР одоогоор унадаг (Invalid column name 'TemplateType', 2026-11-05) — сценари засахгүй.
+  "H1: Ажилтан авах → Гэрээ → Цалин":
+    type: e2e
+    code: H1
+    description: "Тест хэлтэс, албан тушаал, гэрээний төрөл → ажилтан (+1) → гэрээ (+1) → цалин (+1 500 000) → устгахад бүх Δ = 0"
+    steps:
+      - uses: crud.auto_create
+        name: "Тест хэлтэс үүсгэх"
+        with: {menu: "Мастер дата|Компанийн бүтэц|Хэлтэс тасаг|departmentlist", save_as: h01_rec, field_as: h01_field,
+               try_as: h01_try}
+      - uses: crud.auto_create
+        name: "Тест албан тушаал үүсгэх"
+        with: {menu: "Мастер дата|Албан тушаал|Албан тушаал|positionlist", save_as: h02_rec, field_as: h02_field,
+               try_as: h02_try}
+      - uses: crud.auto_create
+        name: "Тест гэрээний төрөл үүсгэх"
+        with: {menu: "Мастер дата|Гэрээ|Гэрээний төрөл|contracttypelist", save_as: h06_rec, field_as: h06_field,
+               try_as: h06_try}
+
+      # ---- эхний төлөв
+      - &emp
+        uses: report.read
+        name: "Ажилтны тоо — эхний төлөв"
+        with: &empw
+          menu: "Ажилтан||Ажилтны жагсаалт|employeelist"
+          search: true
+          rows:
+            emp: {match: "{run_tag}03", column: "Код", agg: count}
+          save_as: e0
+      - &con
+        uses: report.read
+        name: "Гэрээний тоо — эхний төлөв"
+        with: &conw
+          menu: "Хөдөлмөрийн харилцаа|Жагсаалт|Гэрээний жагсаалт|major/contractlist"
+          search: true
+          rows:
+            contract: {match: "{run_tag}03", column: "Ажилтны код", agg: count}
+          save_as: c0
+      - &sal
+        uses: report.read
+        name: "Үндсэн цалин — эхний төлөв"
+        with: &salw
+          menu: "Ажилтан|Цалин|Цалингийн жагсаалт|employeeinfo/employeesalarylist"
+          search: true
+          rows:
+            salary: {match: "{run_tag}03", column: "Үндсэн цалин", agg: sum}
+          save_as: s0
+
+      # ---- ажилтан
+      - uses: crud.auto_create
+        name: "Ажилтан бүртгэх (тест хэлтэс, албан тушаалд)"
+        with:
+          menu: "Ажилтан||Ажилтны жагсаалт|employeelist"
+          save_as: h03_rec
+          field_as: h03_field
+          try_as: h03_try
+          prefer: {"Хэлтэс тасаг": "{run_tag}01", "Албан тушаал": "{run_tag}02"}
+          # «ТТД бөглөнө үү!» — талбар эхний табад алга; Банк, Банкны данс-ыг анхааруулгын дагуу бөглөнө (2026-11-05)
+          # Регистр: 2 үсэг + 8 цифр; эхний 6 цифрээс систем төрсөн огноог тооцдог тул {run_reg} хүчинтэй огноо үүсгэнэ
+          values: {"Регистрийн №": "SS{run_reg}", "Татвар төлөгчийн №": "{run_tag}", "Ажилд орсон огноо": "{today}"}
+      - <<: *emp
+        name: "Ажилтны тоо — бүртгэсний дараа"
+        with: {<<: *empw, save_as: e1}
+      - uses: assert.delta
+        name: "Ажилтны тоо +1"
+        with: {before: e0, after: e1, expect: {emp: 1}}
+
+      # ---- гэрээ
+      - uses: crud.auto_create
+        name: "Хөдөлмөрийн гэрээ бүртгэх"
+        with:
+          menu: "Хөдөлмөрийн харилцаа|Жагсаалт|Гэрээний жагсаалт|major/contractlist"
+          save_as: h04_rec
+          field_as: h04_field
+          try_as: h04_try
+          record: "{run_tag}03"       # «Баримтын №»-ийг систем олгодог — бичвэл дугаар эвдэрнэ
+          prefer: {"Ажилтан": "{run_tag}03", "Гэрээний төрөл": "{run_tag}06"}
+      - <<: *con
+        name: "Гэрээний тоо — бүртгэсний дараа"
+        with: {<<: *conw, save_as: c1}
+      - uses: assert.delta
+        name: "Гэрээний тоо +1"
+        with: {before: c0, after: c1, expect: {contract: 1}}
+
+      # ---- цалин
+      - uses: crud.auto_create
+        name: "Үндсэн цалин бүртгэх — 1 500 000₮"
+        with:
+          menu: "Ажилтан|Цалин|Цалингийн жагсаалт|employeeinfo/employeesalarylist"
+          save_as: h05_rec
+          field_as: h05_field
+          try_as: h05_try
+          record: "{run_tag}03"       # «Баримтын №»-ийг систем олгодог (ЦБ…); таамаглал бол «Үндсэн цалин» дүнд текст орно
+          prefer: {"Ажилтан": "{run_tag}03"}
+          values: {"Үндсэн цалин": "1500000"}
+      - <<: *sal
+        name: "Үндсэн цалин — бүртгэсний дараа"
+        with: {<<: *salw, save_as: s1}
+      - uses: assert.delta
+        name: "Үндсэн цалин +1 500 000"
+        with: {before: s0, after: s1, expect: {salary: 1500000}}
+
+      # ---- цэвэрлэгээ (always): эсрэг дарааллаар, алхам бүрд Δ = 0
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: цалин"
+        always: true
+        with: {menu: "Ажилтан|Цалин|Цалингийн жагсаалт|employeeinfo/employeesalarylist", data: h05, find: "{run_tag}03"}
+      - <<: *sal
+        name: "Үндсэн цалин — устгасны дараа"
+        always: true
+        with: {<<: *salw, save_as: s2}
+      - uses: assert.delta
+        name: "Цэвэрлэгээ: цалин анхны төлөвтөө (Δ = 0)"
+        always: true
+        with: {before: s0, after: s2, expect: {salary: 0}, cleanup_of: h05}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: гэрээ"
+        always: true
+        with: {menu: "Хөдөлмөрийн харилцаа|Жагсаалт|Гэрээний жагсаалт|major/contractlist", data: h04, find: "{run_tag}03"}
+      - <<: *con
+        name: "Гэрээний тоо — устгасны дараа"
+        always: true
+        with: {<<: *conw, save_as: c2}
+      - uses: assert.delta
+        name: "Цэвэрлэгээ: гэрээ анхны төлөвтөө (Δ = 0)"
+        always: true
+        with: {before: c0, after: c2, expect: {contract: 0}, cleanup_of: h04}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: ажилтан"
+        always: true
+        with: {menu: "Ажилтан||Ажилтны жагсаалт|employeelist", data: h03}
+      - <<: *emp
+        name: "Ажилтны тоо — устгасны дараа"
+        always: true
+        with: {<<: *empw, save_as: e2}
+      - uses: assert.delta
+        name: "Цэвэрлэгээ: ажилтны тоо анхны төлөвтөө (Δ = 0)"
+        always: true
+        with: {before: e0, after: e2, expect: {emp: 0}, cleanup_of: h03}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: тест албан тушаал"
+        always: true
+        with: {menu: "Мастер дата|Албан тушаал|Албан тушаал|positionlist", data: h02}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: тест хэлтэс"
+        always: true
+        with: {menu: "Мастер дата|Компанийн бүтэц|Хэлтэс тасаг|departmentlist", data: h01}
+      - uses: crud.auto_cleanup
+        name: "Цэвэрлэх: тест гэрээний төрөл"
+        always: true
+        with: {menu: "Мастер дата|Гэрээ|Гэрээний төрөл|contracttypelist", data: h06}

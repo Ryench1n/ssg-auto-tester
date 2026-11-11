@@ -32,7 +32,9 @@ from app.runner.classify.cause import OUTAGE_PREFIX, cause_of, is_outage, status
 # Өгөгдөл өөрчлөхгүй алхмууд — хэрэгслийн түр саадаар зогсвол сэргээгээд 1 удаа дахин ажиллуулахад аюулгүй
 RETRYABLE_STEPS = {"report.read", "assert.delta", "doc.number", "crud.search", "crud.open", "crud.auto_verify",
                    "form.check_new", "form.check_actions", "form.check_edit", "ui.menu", "ui.search", "ui.tab",
-                   "auth.expect_access"}
+                   "auth.expect_access",
+                   # run_tag-аар дахин хайж устгадаг тул давтахад аюулгүй; тасалдлын дараа апп сэргэхийг хүлээнэ
+                   "crud.auto_cleanup"}
 from app.flows.context import (FlowContext, FlowRun, MissingData, StepBlocked, StepFailed, StepResult,
                                placeholders)
 from app.runner import browser as browser_mod
@@ -57,6 +59,14 @@ StepFn = Callable[["FlowEngine", dict], Awaitable[dict | None]]
 
 # Алхмын явцад гарвал шууд Fail болгох илрэл (консолын жижиг алдаа, 4xx нь тэмдэглэл л болно)
 HARD_KINDS = {M.RUNTIME_CRASH, M.RENDERER_EXCEPTION, M.HTTP_5XX, M.AUTH_ERROR}
+OUTAGE_STATUS = {502, 503, 504}
+
+
+def split_outage(hard: list) -> tuple[list, list]:
+    """(апп-ын алдаа, gateway тасалдал): 502/503/504 нь тест орчин хүрэх боломжгүй — функциональ bug биш
+    (testhr H1 ажилтан устгах, Cloudflare 502, 2026-11-09). HTTP 500 бол endpoint-ийн бодит алдаа байж болно."""
+    outage = [f for f in hard if f.kind == M.HTTP_5XX and f.status in OUTAGE_STATUS]
+    return [f for f in hard if f not in outage], outage
 
 
 @dataclass
@@ -305,12 +315,14 @@ class FlowEngine:
                 res.message = f"Өмнөх алхам #{broken.index} ({broken.name}) {broken.status}"
             else:
                 await self._run_with_session(res, STEPS[uses], args, timeout_s)
-                if (res.status == M.BLOCKED and uses in RETRYABLE_STEPS and not res.retried
-                        and cause_of(res.category, res.message) == "tool" and not self.cancel_event.is_set()):
+                infra = res.category == "infra" and uses == "crud.auto_cleanup"
+                if (res.status == M.BLOCKED and uses in RETRYABLE_STEPS and not res.retried and not self.cancel_event.is_set()
+                        and (cause_of(res.category, res.message) == "tool" or infra)):
                     # Хэрэгслийн түр зуурын саад (timeout, элемент, selector) — өгөгдөл өөрчлөхгүй алхмыг сэргээгээд 1 удаа
-                    # дахин ажиллуулна; хоёр дахь удаа ч мөн адил бол л «шалгагдаагүй (хэрэгсэл)»
+                    # дахин ажиллуулна; хоёр дахь удаа ч мөн адил бол л «шалгагдаагүй (хэрэгсэл)». Цэвэрлэгээ тест орчны
+                    # тасалдлаар (502) бүтэлгүйтвэл апп сэргэхийг удаан хүлээнэ — эс бөгөөс тест өгөгдөл үлддэг
                     first = res.message
-                    await self._recover_ui()
+                    await self._recover_ui(30 if infra else 5)
                     res.status, res.message, res.findings, res.screenshot, res.outputs = M.PENDING, "", [], "", {}
                     notes = res.notes + [f"Хэрэгслийн шалтгаантай зогссон тул сэргээж дахин ажиллуулав ({first[:120]})"]
                     await self._run_with_session(res, STEPS[uses], args, timeout_s)
@@ -324,7 +336,7 @@ class FlowEngine:
                      "info" if res.status == M.PASS else "warn")
             self._emit_step(res, res.status)
 
-    async def _recover_ui(self) -> None:
+    async def _recover_ui(self, wait_s: float = 5) -> None:
         """Хэрэгслийн түр саадын дараах сэргээлт: нээлттэй цонх/toast хааж, хуудас тайван болохыг хүлээнэ."""
         if self.page is None:
             return
@@ -335,7 +347,7 @@ class FlowEngine:
             except Exception:
                 pass
         try:
-            await ui.settle(self, 5)
+            await ui.settle(self, wait_s)
         except Exception:
             pass
 
@@ -431,9 +443,12 @@ class FlowEngine:
         if self.col is not None:
             await self.col.drain()
             found = self.col.findings_from(self.col.since(t0), include_deploy=True)
-            hard = [f for f in found if f.kind in HARD_KINDS]
+            hard, outage = split_outage([f for f in found if f.kind in HARD_KINDS])
             known = {(f.kind, f.text) for f in res.findings}
             res.findings += [f for f in found if (f.kind, f.text) not in known]
+            if outage and not hard and res.status != M.PASS and res.category != "infra":
+                res.status, res.category = M.BLOCKED, "infra"
+                res.message = (f"{OUTAGE_PREFIX} (HTTP {outage[0].status}): {res.message}")[:500]
             if hard and res.status in (M.PASS, M.BLOCKED) and "Session" not in (res.message or ""):
                 # Апп уналт / 5xx нь bug — алхам «шалгаж чадаагүй» (Blocked) болсон ч шалтгаан нь апп өөрөө
                 if res.status == M.BLOCKED and res.message:

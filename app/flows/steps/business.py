@@ -163,6 +163,12 @@ def sum_values(headers: list[str], rows: list[list[str]], match: str, column: st
     return total, ""
 
 
+def count_rows(rows: list[list[str]], match: str) -> float:
+    """match агуулсан мөрийн тоо — ж: ажилтан / гэрээний тоо (тоон багана байхгүй жагсаалт). Таарах мөргүй бол 0."""
+    m = _norm(match)
+    return float(sum(1 for r in rows if any(m in _norm(x) for x in r)))
+
+
 def read_table_file(path: Path) -> tuple[list[str], list[list[str]]]:
     """Export хийсэн тайлан (xlsx / csv) → (толгой, мөрүүд). Толгой = эхний ≥2 текст нүдтэй мөр."""
     if path.suffix.lower() in (".xlsx", ".xlsm"):
@@ -194,6 +200,7 @@ async def report_read(env, args: dict) -> dict:
       export: ["Файл үүсгэх", "Excel"]  # export горимын товч/цэсийн дараалал (сүүлийнх нь файл татна)
       rows: {avlaga: {match: "1201", column: "Эцсийн үлдэгдэл"}}
             # эсвэл нийлбэр: {match: "<данс>", column: "Дебет", minus: "Кредит", agg: sum} — ГД-ийн бичилтийн жагсаалтаас
+            # эсвэл мөрийн тоо: {match: "{run_tag}03", column: "Код", agg: count} — ж: ажилтны тоо
       refresh: true                  # уншихын өмнө жагсаалтыг «Шүүх»/«Сэргээх»-ээр шинэчилнэ (нээлттэй таб хуучирсан байж болно)
       save_as: tb_before             # → ctx[tb_before] = {avlaga: 500000.0, …}
     """
@@ -246,7 +253,7 @@ async def report_read(env, args: dict) -> dict:
             if grid and grid["rows"]:
                 headers = grid["headers"]
                 rows += grid["rows"]
-        if not rows and not all((x.get("agg") == "sum") for x in (args.get("rows") or {}).values()):
+        if not rows and not all((x.get("agg") in ("sum", "count")) for x in (args.get("rows") or {}).values()):
             raise StepBlocked("Жагсаалтаас хайсан мөр олдсонгүй — rows.match (дансны код)-ыг шалгана уу", category="tool")
         if not headers:      # нийлбэр, бичилтгүй (шинэ данс) — баганыг хоосон grid-ийн толгойноос
             grid = await env.page.evaluate(READ_GRID_JS, [ui.sel_payload(env), _want_columns(args.get("rows") or {})])
@@ -269,7 +276,9 @@ async def report_read(env, args: dict) -> dict:
         headers, rows = grid["headers"], grid["rows"]
     values, problems = {}, []
     for alias, spec in (args.get("rows") or {}).items():
-        if spec.get("agg") == "sum":
+        if spec.get("agg") == "count":
+            v, why = count_rows(by_match.get(str(spec["match"]), rows), str(spec["match"])), ""
+        elif spec.get("agg") == "sum":
             own = by_match.get(str(spec["match"]), rows)
             v, why = sum_values(headers, own, str(spec["match"]), str(spec["column"]), str(spec.get("minus") or ""))
         else:
@@ -301,7 +310,12 @@ async def assert_delta(env, args: dict) -> dict:
       after: tb_after
       expect: {avlaga: "{amount}", orlogo: "-{amount}"}   # Δ = after − before
       tolerance: 0.01
+      cleanup_of: h05                # энэ өгөгдлийн цэвэрлэгээ бүтэлгүйтсэн бол Δ = 0 гэж шалгахгүй: үлдсэн өгөгдөл
+                                     # нь апп-ын bug биш, leftover болж тайланд гарна
     """
+    if args.get("cleanup_of") and env.ctx.data.get(f"{args['cleanup_of']}_left"):
+        raise StepBlocked("Цэвэрлэгээ бүтэлгүйтсэн тул Δ = 0 шалгах утгагүй (үлдсэн өгөгдлийг тайлангаас харна уу)",
+                          category="tool")
     missing = [str(args[k]) for k in ("before", "after") if str(args[k]) not in env.ctx.data]
     if missing:
         # Тайлангийн агшин авагдаагүй (өмнөх уншилт амжилтгүй) — харьцуулах зүйлгүй, аппын шинэ алдаа биш

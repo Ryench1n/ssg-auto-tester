@@ -113,7 +113,9 @@ async def auto_verify(env, args: dict) -> dict:
 @step("crud.auto_cleanup")
 async def auto_cleanup(env, args: dict) -> dict:
     """with: {menu, data: a01} — always. Бүртгэл/засвар/устгал Fail болсон ч run_tag-тай бичлэг үлдсэн эсэхийг
-    хайж, үлдсэн бол устгана. Устгаж чадахгүй бол meta.leftover-т бичиж тайланд «цэвэрлээгүй өгөгдөл» гэж гаргана."""
+    хайж, үлдсэн бол устгана. Устгаж чадахгүй бол meta.leftover-т бичиж тайланд «цэвэрлээгүй өгөгдөл» гэж гаргана.
+    find: "{run_tag}03" — түлхүүр талбарын багана жагсаалтад алга бол (HR цалин, гэрээ) мөрийг өөр run_tag-тай
+    утгаар (ажилтны код) хайна."""
     from app.flows.steps.crud import crud_delete
     p = str(args["data"])
     tag = env.ctx.run_tag
@@ -122,11 +124,20 @@ async def auto_cleanup(env, args: dict) -> dict:
                                if t and tag in str(t)))
     if not texts:
         raise StepBlocked("Бүртгэл хадгалах хүртэл явагдаагүй — цэвэрлэх өгөгдөл алга (хамаарахгүй)", category="na")
+    find = str(args.get("find") or "")
+    if find:
+        texts = [find]
+    saved = env.ctx.data.get(f"{p}_rec")           # бүртгэх алхам Pass — бичлэг хадгалагдсан нь тодорхой
+    if find and saved:
+        saved = find
+    # Алхам дундуур тасалдвал (timeout, хөтөч) ч хадгалсан бичлэг үлдэгдэлд бүртгэгдсэн байна — амжилттай бол арилна
+    pending = [t for t in texts if t == saved]
+    _set_leftover(env, p, [f"{t.replace(tag, '{run_tag}')}: цэвэрлэгээ дуусаагүй (алхам тасалдсан) — гараар шалгана уу"
+                           for t in pending], pending)
     await ui.close_form(env)
     await ui.clear_toasts(env)
     await ui.ensure_menu(env, args.get("menu"))
     cleaned, left = [], []
-    saved = env.ctx.data.get(f"{p}_rec")           # бүртгэх алхам Pass — бичлэг хадгалагдсан нь тодорхой
     deleted = env.ctx.data.get("_deleted") or set()
     for text in texts:
         if not await ui.grid_find_settled(env, text, tries=2):
@@ -151,14 +162,32 @@ async def auto_cleanup(env, args: dict) -> dict:
         failed_before = any(s.status != "Pass" and s.category not in ("na",) for s in env.run.steps[:-1])
         env.note(("Өмнөх алхам амжилтгүй болсон ч үүссэн тестийн өгөгдлийг устгав: " if failed_before
                   else "Тестийн өгөгдлийг устгав: ") + ", ".join(cleaned))
+    # Бодит утга — автомат CRUD-ийн төгсгөлд ижил модулийн бусад жагсаалтаас хайж устгана (AutoCrudStage._sweep)
+    _set_leftover(env, p, left, [t for t in texts if t == saved and t not in cleaned])
     if left:
-        env.run.meta["leftover"] = left
-        # Бодит утга — автомат CRUD-ийн төгсгөлд ижил модулийн бусад жагсаалтаас хайж устгана (AutoCrudStage._sweep)
-        env.run.meta["leftover_values"] = [t for t in texts if t == saved and t not in cleaned]
         raise StepBlocked("Тестийн өгөгдөл үлдсэн (гараар устгана уу): " + "; ".join(left))
     if not cleaned:
         env.note("Тестийн өгөгдөл үлдээгүй")
     return {}
+
+
+def _set_leftover(env, p: str, left: list[str], values: list[str]) -> None:
+    """Цэвэрлэгээ бүрийн үлдэгдлийг тусад нь хадгалж нэгтгэнэ — E2E-д олон цэвэрлэгээ байх ба дараагийнх нь
+    өмнөхийг дарж бичдэггүй (testhr H1 2026-11-09: 6 үлдэгдлээс тайланд зөвхөн H06 гарсан). Дахин оролдлого
+    амжилттай бол тухайн алхмын үлдэгдэл арилна."""
+    meta = env.run.meta
+    by, vals = meta.setdefault("leftover_by", {}), meta.setdefault("leftover_values_by", {})
+    by[p], vals[p] = list(left), list(values)
+    for key, src in (("leftover", by), ("leftover_values", vals)):
+        flat = [x for v in src.values() for x in v]
+        if flat:
+            meta[key] = flat
+        else:
+            meta.pop(key, None)
+    if left:
+        env.ctx.data[f"{p}_left"] = True      # assert.delta (cleanup_of) — Δ = 0 шалгах утгагүй
+    else:
+        env.ctx.data.pop(f"{p}_left", None)
 
 
 # ---------------------------------------------------------------- сөрөг тест: хоосон форм хадгалах

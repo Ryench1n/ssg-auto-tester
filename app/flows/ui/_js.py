@@ -154,9 +154,15 @@ FIND_ROWS_JS = r"""
   /*__COMMON__*/
   document.querySelectorAll('[data-ssg-row]').forEach(e => e.removeAttribute('data-ssg-row'));
   const want = __norm(text);
-  const rows = Array.from(document.querySelectorAll(sel.grid_row)).filter(__vis)
+  const hits = Array.from(document.querySelectorAll(sel.grid_row)).filter(__vis)
       .filter(r => !__findDialogs(sel).some(d => d.contains(r)))
       .filter(r => __norm(__txt(r)).includes(want));
+  // Бүлэглэсэн grid-ийн толгой мөр («Ажилтан: <код> - <нэр>») бичлэг биш: сонгож «Устгах» дарахад юу ч болдоггүй
+  // (testhr «Цалингийн жагсаалт», 2026-11-05) — өгөгдлийн мөр байвал толгойг алгасна
+  const isGroup = (r) => /group-row/i.test(typeof r.className === 'string' ? r.className : '')
+      || Array.from(r.children).some(c => c.colSpan > 1);
+  const data = hits.filter(r => !isGroup(r));
+  const rows = data.length ? data : hits;
   rows.forEach((r, i) => r.setAttribute('data-ssg-row', String(i)));
   return rows.map(r => __txt(r).replace(/\s+/g, ' ').slice(0, 200));
 }

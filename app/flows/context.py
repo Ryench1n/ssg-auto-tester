@@ -1,6 +1,7 @@
 """Component-based E2E: алхам хоорондын өгөгдөл (FlowContext) ба үр дүнгийн бүтэц."""
 from __future__ import annotations
 
+import hashlib
 import secrets
 import string
 import threading
@@ -53,6 +54,15 @@ def make_run_tag() -> str:
                 return tag
 
 
+def run_register(run_tag: str) -> str:
+    """Регистрийн 8 цифр ({run_reg}): YYMMDD + 2 цифр — систем төрсөн огноог эхний 6 цифрээс тооцдог тул хүчинтэй огноо
+    байх ёстой («SS88232230» → 2088-03-22: «Төрсөн огноо өнөөдрөөс хойш…», testhr 2026-11-05). 1960–1999 он, сар 01–12
+    (20-оос их сар нь 2000 оноос хойшхийг заана), өдөр 01–28. run_tag-ийг шууд оруулбал маск нь цифрийг л үлдээж нэг
+    run-ын ажилтнууд регистрээр давхцдаг байсан."""
+    n = int(hashlib.sha1(run_tag.encode()).hexdigest(), 16)
+    return f"{60 + n % 40:02d}{1 + (n >> 8) % 12:02d}{1 + (n >> 16) % 28:02d}{(n >> 24) % 100:02d}"
+
+
 _FMT = string.Formatter()
 
 
@@ -71,6 +81,7 @@ def placeholders(value: Any) -> set[str]:
             out |= placeholders(v)
     out.discard("run_tag")
     out.discard("today")
+    out.discard("run_reg")
     return out
 
 
@@ -82,7 +93,8 @@ class FlowContext:
     def render(self, value: Any) -> Any:
         if isinstance(value, str):
             # {today} — бичсэн урсгалын «өнөөдрийн огноо» (YYYY-MM-DD)
-            names = {"run_tag": self.run_tag, "today": datetime.now().strftime("%Y-%m-%d"), **self.data}
+            names = {"run_tag": self.run_tag, "run_reg": run_register(self.run_tag),
+                     "today": datetime.now().strftime("%Y-%m-%d"), **self.data}
             missing = placeholders(value) - set(names)
             if missing:
                 raise MissingData(", ".join(sorted(missing)))

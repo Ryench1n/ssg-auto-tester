@@ -37,7 +37,9 @@ def coverage(tcs: list[TestCase], not_tested: list[dict] | None) -> dict:
 
 
 def go_no_go(tcs: list[TestCase], bugs: list[Bug], cancelled: bool = False, not_tested: list[dict] | None = None,
-             min_coverage: float = 90.0) -> dict:
+             min_coverage: float = 90.0, unfinished: list[str] | None = None) -> dict:
+    """unfinished: дуусаагүй бизнес процессын (E2E) нэрс — гүйцэтгэсэн алхмууд бүгд Pass ч процесс бүрэн шалгагдаагүй
+    тул GO гаргахгүй (testhr H1: гэрээ, цалин ажиллаагүй атал GO · 100% гарсан, 2026-11-05)."""
     s = stats(tcs)
     cov = coverage(tcs, not_tested)
     crit = sum(1 for b in bugs if b.severity == Severity.CRITICAL)
@@ -76,6 +78,9 @@ def go_no_go(tcs: list[TestCase], bugs: list[Bug], cancelled: bool = False, not_
                              "(хэрэгсэл/хэрэглэгчийн шалтгаан) тул эцсийн дүгнэлт гаргах боломжгүй"]
     else:
         decision = "GO" if not reasons else "NO-GO"
+        if unfinished:
+            decision = "INCOMPLETE" if decision == "GO" else decision
+            reasons = reasons + [f"Бизнес процесс дуусаагүй: {n}" for n in unfinished]
     return {"decision": decision, "reasons": reasons, "conditions": conds, "stats": s, "coverage": cov,
             "bug_counts": {"critical": crit, "major": major, "minor": minor, "total": len(bugs)}}
 

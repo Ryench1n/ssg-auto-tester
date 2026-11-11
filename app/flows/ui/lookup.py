@@ -145,7 +145,11 @@ async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True,
         searched = False
         empty_since = None      # «Бичлэг олдсонгүй» анх харагдсан цаг
         deadline = time.monotonic() + fcfg(env).get("lookup_timeout_ms", 12000) / 1000
-        while time.monotonic() < deadline:
+        # Хуудасны «Түр хүлээнэ үү…» overlay цонхны ГАДНА гардаг: ард нь «Бичлэг олдсонгүй» харагдсан ч өгөгдөл
+        # ачаалж байна (testhr «Даатгуулагчийн төрөл» ~10 сек, 2026-11-09) — дуустал loading_blocked_ms хүртэл хүлээнэ
+        hard = time.monotonic() + env.cfg["timing"]["loading_blocked_ms"] / 1000
+        loading = False
+        while time.monotonic() < deadline or (loading and time.monotonic() < hard):
             row = await page.evaluate(MARK_LOOKUP_ROW_JS, [sel_payload(env), want])
             if want and not row and not searched:
                 # цонхны хайлтаар шүүгээд дахин үзнэ (нөхцөлт сонголт — эхний эерэг үгээр; эерэг үггүй бол хайхгүй)
@@ -163,11 +167,14 @@ async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True,
                 await shot("error")
                 await close_form(env, keep=before)
                 raise StepFailed(f"{what or 'Сонголтын'} (lookup) цонх нээхэд: {errors[0].text}", errors)
-            empty_since = (empty_since or time.monotonic()) if row == "" else None
-            if row == "" and time.monotonic() - empty_since >= fcfg(env).get("empty_stable_ms", 1500) / 1000:
+            loading = row == "" and await _page_loading(env)
+            empty_since = (empty_since or time.monotonic()) if row == "" and not loading else None
+            if empty_since is not None and time.monotonic() - empty_since >= fcfg(env).get("empty_stable_ms", 1500) / 1000:
                 break
             await asyncio.sleep(0.3)
         await shot("open")
+        if row == "" and loading:
+            row = None                            # ачаалал дуусаагүй — «өгөгдөл алга» биш
         if not row:                               # хоосон lookup эсвэл ачаалагдсангүй
             errors, _ = await popup_problems(env)
             if errors:
@@ -223,3 +230,14 @@ async def pick_from_lookup(env: "FlowEngine", what: str = "", pick: bool = True,
     finally:
         env.runlog.log(f"[{getattr(env, 'flow_name', '')}] lookup #{seq}: " + " → ".join(trace), "info",
                        to_ui=False)
+
+
+async def _page_loading(env: "FlowEngine") -> bool:
+    """Хуудасны ачааллын индикатор (selectors.loading / loading_texts) харагдаж байгаа эсэх."""
+    from app.runner.detectors import snapshot
+    try:
+        st = await snapshot(env.page, env.cfg)
+    except Exception:
+        return False
+    return bool(st and st.loading)
+

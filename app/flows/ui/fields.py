@@ -250,7 +250,7 @@ async def reveal_field(env: "FlowEngine", label: str) -> dict:
         pass
     active = await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), -2])
     n = await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), -1])
-    for i in range(min(n, 12)):
+    for i in range(min(n, 30)):                 # testhr ажилтны форм 17+ табтай
         await env.page.evaluate(FORM_TAB_JS, [sel_payload(env), i])
         try:
             return await find_field(env, label, wait_s=1.0)

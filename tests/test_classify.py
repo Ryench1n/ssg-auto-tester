@@ -237,3 +237,12 @@ def test_bug_title_shows_real_file_name():
     b = Finding(M.ASSET_4XX, "HTTP 404", status=404, url="https://x/fonts/times2.ttf")
     c = Finding(M.ASSET_4XX, "HTTP 404", status=404, url="https://x/fonts/times3.ttf")
     assert signature(b) == signature(c)
+
+
+def test_unfinished_business_process_is_not_go(cfg):
+    """Гүйцэтгэсэн алхмууд бүгд Pass ч процесс дуусаагүй бол GO биш (testhr H1, 2026-11-05); алдаатай бол NO-GO хэвээр."""
+    run = make_run(20)
+    tcs, _ = build_test_cases(run, cfg, "QA", "2026-11-05")
+    assert go_no_go(tcs, [], unfinished=[])["decision"] != "INCOMPLETE"
+    bad = go_no_go(tcs, [], unfinished=["H1: Ажилтан авах"])
+    assert bad["decision"] == "INCOMPLETE" and any("H1" in r for r in bad["reasons"])

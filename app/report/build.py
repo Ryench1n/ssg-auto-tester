@@ -202,7 +202,9 @@ def generate_reports(run: RunData, cfg: dict, run_dir: Path, verify: bool = True
     bugs = build_bugs(run, tcs, cfg)
     nt = not_tested_items(run)
     go = go_no_go(tcs, bugs, cancelled=run.cancelled, not_tested=nt,
-                  min_coverage=float((cfg.get("verdict") or {}).get("min_coverage", 90)))
+                  min_coverage=float((cfg.get("verdict") or {}).get("min_coverage", 90)),
+                  unfinished=[f["flow"] for f in run.flows if (f.get("meta") or {}).get("e2e")
+                              and f.get("status") in (M.NOT_TESTED, M.BLOCKED)])
 
     proj = safe_project(run.project)
     xlsx = run_dir / f"{proj}-Test-Cases-{run.version_label}.xlsx"

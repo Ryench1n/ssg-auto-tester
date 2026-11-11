@@ -166,6 +166,17 @@ def plan_values(fields: list[dict], tag: str, auto_cfg: dict, uid: str = "",
     return values, (key_f["label"] if key_f else ""), picks, unresolved
 
 
+def without_key(values: dict, key: str) -> tuple[dict, str]:
+    """run_tag бичих талбаргүй: систем дугаарыг олгодог бол таамагласан түлхүүрт бичвэл дугаар эвдэрнэ («ЦБ123002» +
+    текст → «Баримтын дугаар давхардаж байна», testhr цалин), дүнгийн талбарт бичвэл текст орно (2026-11-05)."""
+    return {k: v for k, v in values.items() if k != key}, ""
+
+
+def field_aliases(cfg: dict, label: str) -> list[str]:
+    """Анхааруулгын богино нэр ↔ формын шошго (ж: «ТТД бөглөнө үү!» ↔ «Татвар төлөгчийн №», testhr ажилтан)."""
+    return list((cfg.get("field_aliases") or {}).get(label) or [])
+
+
 def suffix_field(fields: list[dict], name: str) -> str:
     """Анхааруулгад нэрлэсэн талбар (ж: «Бүлэг») — шошго нь тэр үгээр ТӨГСДӨГ ганц талбар («Харьяалагдах бүлэг»).
     Олон таарвал заавал (*) бөгөөд хоосныг; тодорхой биш бол ""."""
@@ -264,6 +275,17 @@ async def auto_create(env, args: dict) -> dict:
         return await _auto_create(env, {**args, "_group": group})
 
 
+async def wait_button(env, texts: list[str], wait_s: float = 10) -> bool:
+    """Хэрэгслийн самбар ачааллын дараа хожуу зурагддаг — товч гартал (дээд тал нь wait_s) хүлээнэ."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        if await ui.has_button(env, texts):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.5)
+
+
 async def _auto_create(env, args: dict) -> dict:
     """with: {menu: <цэсний түлхүүр/зам>, save_as: a01_rec, field_as: a01_field,
               try_as: a01_try,      # хадгалахын ӨМНӨ ctx-д бичнэ — Fail болсон ч цэвэрлэгээ хайж устгана
@@ -271,14 +293,25 @@ async def _auto_create(env, args: dict) -> dict:
               prefer: {Ажилтан: "<мастер бичлэгийн утга>"},   # lookup-д энэ бичлэгийг сонгоно (заавал биш
                                                               # талбарт ч — ж: борлуулалтын «Харилцагч»)
               values: {"Худалдах үнэ": "1000"},   # тодорхой утга (заавал биш талбарт ч); формд алга бол алгасна
+              record: "{run_tag}03",  # баримтын дугаарыг систем олгодог форм: run_tag-ийг ямар ч талбарт бичихгүй —
+                                      # бичлэгийг энэ утгаар (ж: ажилтны код) таньж цэвэрлэнэ (HR цалин, гэрээ)
               add_menu: "Кассын орлогын ордер",   # «Шинэ» нь төрөл сонгох цэстэй бол энэ зүйлийг сонгоно
               lines: {debit: "1001", credit: "5101", amount: "1"}}  # мөрийн grid: данс бүрийг заах (E2E Δ)
               # эсвэл барааны мөр: {item: "{run_tag}12", cells: {"Тоо хэмжээ": "1", "Нэгж үнэ": "1000"}}"""
     tag = env.ctx.run_tag
     add, delete = ui.buttons(env, "add"), ui.buttons(env, "delete")
     await ui.ensure_menu(env, args["menu"])
-    if not await ui.has_button(env, add):
-        raise StepBlocked(f"Нэмэх товч ({' / '.join(add)}) олдсонгүй", skip_flow=True)
+    if not await wait_button(env, add):
+        # Хуудас хэрэгслийн самбаргүй зурагдсан (testhr «Хэлтэс тасаг», 2026-11-11: зөвхөн хоосон grid) — табыг
+        # хааж дахин нээгээд нэг удаа шалгана
+        from app.runner.detectors import snapshot
+        st = await snapshot(env.page, env.cfg)
+        if st and st.active_tab:
+            await ui.close_tabs(env, [st.active_tab])
+            await ui.ensure_menu(env, args["menu"])
+            env.note(f"«{st.active_tab}» табд Нэмэх товч гарсангүй — табыг дахин нээв")
+        if not await wait_button(env, add):
+            raise StepBlocked(f"Нэмэх товч ({' / '.join(add)}) олдсонгүй", skip_flow=True)
     if not await ui.has_button(env, delete):
         raise StepBlocked("Устгах товч олдсонгүй — тестийн өгөгдлийг цэвэрлэх боломжгүй тул бүртгэхгүй",
                           skip_flow=True)
@@ -322,6 +355,9 @@ async def _auto_create(env, args: dict) -> dict:
                               "боловч талбарын шошго илэрсэнгүй — оношлогоог тайлангаас харна уу", skip_flow=True)
         values, key, picks, unresolved = plan_values(fields, tag, ui.fcfg(env).get("auto") or {},
                                                      _uid(args), args.get("columns"))
+        record = str(args.get("record") or "")
+        if record:
+            values, key = without_key(values, key)
         values, picks, unresolved, skipped = apply_explicit(fields, values, picks, unresolved, key,
                                                             args.get("values") or {}, args.get("prefer") or {})
         if skipped:
@@ -332,7 +368,7 @@ async def _auto_create(env, args: dict) -> dict:
         if unresolved:
             raise StepBlocked(f"Заавал талбарыг автоматаар бөглөх боломжгүй: {', '.join(unresolved)} "
                               "— энэ цэсэд YAML flow бичнэ үү (ноорог тайланд)", skip_flow=True)
-        if not key:
+        if not key and not record:
             raise StepBlocked("run_tag бичих текст талбар олдсонгүй", skip_flow=True)
         if args.get("columns") and not in_columns(key, args["columns"]):
             raise StepBlocked(f"Түлхүүр талбар «{key}» жагсаалтын баганад алга ({', '.join((args.get('columns') or [])[:8])}) — "
@@ -392,7 +428,7 @@ async def _auto_create(env, args: dict) -> dict:
                  + (" | Сонгосон: " + ", ".join(f"{l}={v}" for l, v in picked.items()) if picked else ""))
         if args.get("try_as"):
             # Хадгалах оролдлого — «Хадгалах боломжгүй» алдаа гарсан ч бичлэг үүссэн байж болно (цэвэрлэгээ)
-            env.ctx.data[args["try_as"]] = values[key]
+            env.ctx.data[args["try_as"]] = record or values[key]
         if args.get("survey"):
             # Калибровк: хадгалахын өмнө таб бүрийн хоосон талбарууд (ж: кассын орлогын харьцсан данс хаана байна)
             flow = re.sub(r"[^\w-]+", "_", getattr(env, "flow_name", ""), flags=re.U).strip("_")[:30]
@@ -438,7 +474,7 @@ async def _auto_create(env, args: dict) -> dict:
         raise
     if opened == "tab":
         await _close_form_tabs(env, tabs_before)
-    out = {args["save_as"]: values[key], args["field_as"]: key}
+    out = {args["save_as"]: record or values[key], args["field_as"]: key}
     if args.get("values_as"):
         out[args["values_as"]] = {"values": dict(values), "picks": dict(picked), "dates": sorted(dates & set(values))}
     return out
@@ -487,8 +523,17 @@ async def _save_with_lines(env, form_level: int, values: dict | None = None, pic
                 info = await ui.reveal_field(env, label)   # формын өөр таб дээр байж болно
             except StepFailed:
                 # Анхааруулгын нэр ба шошго зөрөх: «Бүлэг сонгоогүй байна!» ↔ «Харьяалагдах бүлэг» (testaccounting
-                # ~15 бүлгийн лавлах, 2026-10-21) — шошгын СҮҮЛИЙН үг(с) нь анхааруулгын нэртэй таарах ганц талбар
+                # ~15 бүлгийн лавлах, 2026-10-21) — шошгын СҮҮЛИЙН үг(с) нь анхааруулгын нэртэй таарах ганц талбар;
+                # товчлол бол (ТТД) тохиргооны field_aliases
                 alt = suffix_field(await ui.scan_form(env, wait_s=0), label)
+                for a in field_aliases(ui.fcfg(env).get("auto") or {}, label):
+                    if alt:
+                        break
+                    try:
+                        await ui.reveal_field(env, a)
+                        alt = a
+                    except StepFailed:
+                        continue
                 if not alt or alt in handled:
                     continue                            # талбар биш (мөрийн grid г.м.)
                 handled.add(alt)

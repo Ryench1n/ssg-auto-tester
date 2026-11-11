@@ -59,7 +59,8 @@ selectors:
   toast: ".dxbl-toast"
   toast_close: ".dxbl-toast-close-btn, .dxbl-toast [aria-label=Close], .dxbl-toast button"
   loading: ".dxbl-loading-panel, .loading-indicator"
-  loading_texts: ["Loading…", "Loading...", "Ачаалж байна"]
+  # «Түр хүлээнэ үү…» — SmartApp-ийн хүсэлтийн overlay; тасалдлын үед удаан үлддэг (testhr H1, 2026-11-09)
+  loading_texts: ["Loading…", "Loading...", "Ачаалж байна", "Түр хүлээнэ үү...", "Түр хүлээнэ үү…", "Түр хүлээнэ үү"]
   forbidden_tab_name: "_403"
   forbidden_texts: ["Sorry, you are not authorized to access this page"]
 
@@ -224,6 +225,9 @@ flow:
     # DateEdit (▾ товчтой) DOM-оор танигдахгүй бол шошгоор огноо гэж үзнэ; төрсөн огноо → 30 жилийн өмнө
     date_labels: ["огноо", "date"]
     birth_labels: ["төрсөн", "birth"]
+    # Анхааруулгын богино нэр → формын шошго (reveal_field олоогүй үед)
+    field_aliases:
+      "ТТД": ["Татвар төлөгчийн №", "Татвар төлөгчийн дугаар", "ТТД"]
     # Validation мессеж эдгээрийг агуулбал «форм тусгай үйлдэл шаарддаг» гэж ангилна (автоматаар хийхгүй)
     workflow_texts: ["татна уу", "татах", "хуваарь"]
     # Сөрөг тест: заавал талбартай шинэ формыг хоосноор хадгалахад анхааруулга гарах ёстой
